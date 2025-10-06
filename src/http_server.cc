@@ -24,9 +24,9 @@ int main() {
   std::ifstream stream(conf);
   if (stream.is_open()) {
     auto root = json::parse(stream);
-    if (root.count("minimax")) {
-      config->groupId = root["minimax"].value("groupId", "");
-      config->apiKey = root["minimax"].value("apiKey", "");
+    if (root.count("groq")) {
+      config->groupId = root["groq"].value("groupId", "");
+      config->apiKey = root["groq"].value("apiKey", "");
     }
   }
 
