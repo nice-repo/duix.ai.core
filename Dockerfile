@@ -87,14 +87,18 @@ WORKDIR /app/audio
 # Python Dependencies
 COPY requirements.txt /app/audio/requirements.txt
 RUN apt-get update && apt-get install aria2 -y
+
+ENV HF_ENDPOINT=https://hf-mirror.com
+
 RUN curl -LsS https://astral.sh/uv/install.sh | sh \
-    && uv version  \
+    # FIX 1: Use 'uv self version' to check the tool's version.
+    && uv self version \
     && uv init . && uv venv \
     && uv add -r /app/audio/requirements.txt \
     && mkdir -p models \
-    && export HF_ENDPOINT=https://hf-mirror.com \
     && bash hfd.sh FunAudioLLM/SenseVoiceSmall \
     && mkdir -p /root/.cache && chmod 777 /root/.cache
+    
 # envs
 ENV PATH="/app/audio/.venv/bin:$PATH"
 
