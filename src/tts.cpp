@@ -212,7 +212,7 @@ std::string tts(const std::string &text, const std::string &voice) {
             // Optional: Log success
             // printf("Successfully saved audio to %s\n", wavPath.c_str());
         } else {
-            fprintf(stderr, "Error: Could not open file for writing: %s\n", wavPath.c_str()());
+            fprintf(stderr, "Error: Could not open file for writing: %s\n", wavPath.c_str());
             wavPath = ""; // Clear path on failure
         }
     }
