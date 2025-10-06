@@ -122,38 +122,29 @@ static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb,
 
 namespace tts {
 
+//new...
 std::string pack(const std::string &text, const std::string &voice) {
-  auto root = json::parse(R"(
-	                       {
-		                     "model":"speech-02-hd",
-		                     "text":"真正的危险不是计算机开始像人一样思考，而是人开始像计算机一样思考。计算机只是可以帮我们处理一些简单事务。",
-		                     "stream":false,
-		                     "language_boost":"auto",
-		                     "output_format":"hex",
-		                     "voice_setting":{
-			                   "voice_id":"tianxin_xiaoling",
-			                   "speed":1,
-			                   "vol":1,
-			                   "pitch":0,
-			                   "emotion":"happy"
-		                     },
-		                     "audio_setting":{
-			                   "sample_rate":16000,
-			                   "bitrate":128000,
-			                   "format":"mp3"
-		                     }
-	                       }
-	                       )");
+    // Using nlohmann::json for clean JSON creation.
+    nlohmann::json payload;
 
-  if (text.size() > 0) {
-    root["text"] = text;
-  }
-  if (voice.size() > 0) {
-    root["voice_setting"]["voice_id"] = voice;
-  }
-  return root.dump();
+    // 1. Set the model. "playai-tts" is Groq's current TTS model.
+    payload["model"] = "playai-tts";
+
+    // 2. Set the input text.
+    payload["input"] = text;
+
+    // 3. Set the voice. Use the provided voice or a default like "Aaliyah-PlayAI".
+    payload["voice"] = !voice.empty() ? voice : "Aaliyah-PlayAI";
+
+    // 4. Set the desired audio format.
+    payload["response_format"] = "wav";
+
+    // Convert the JSON object to a string.
+    return payload.dump();
 }
 
+
+// Sends the TTS request to the Groq API.
 std::string tts(const std::string &text, const std::string &voice) {
   Timer t("tts " + text);
   std::string wav = "./audio/" + text + ".wav";
@@ -178,7 +169,7 @@ std::string tts(const std::string &text, const std::string &voice) {
 
   if (curl) {
     std::string url =
-        "https://api.minimax.chat/v1/t2a_v2?GroupId=" + config->groupId;
+         std::string url = "https://api.groq.com/openai/v1/audio/speech";
     // 设置请求URL
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 
@@ -188,7 +179,7 @@ std::string tts(const std::string &text, const std::string &voice) {
     headers = curl_slist_append(headers, apiKey.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
-    // 设置为POST请求
+	 // Set request type to POST
     curl_easy_setopt(curl, CURLOPT_POST, 1L);
 
     // 设置POST数据
@@ -207,13 +198,27 @@ std::string tts(const std::string &text, const std::string &voice) {
       fprintf(stderr, "curl_easy_perform() failed: %s\n",
               curl_easy_strerror(res));
     } else {
-      // 打印响应数据
-      // printf("%s\n", chunk.memory);
-      auto root = json::parse(chunk.memory);
-      wavPath = writeWav(root["data"]["audio"], text);
+      // SUCCESS: The raw audio data is in chunk.memory.
+        // Write this data directly to a file.
+        
+        // Define the output file path
+        wavPath = "./audio/" + text + ".wav"; // Assuming this is your desired path
+
+        // Open a file stream in binary mode
+        std::ofstream wavFile(wavPath, std::ios::binary);
+        if (wavFile.is_open()) {
+            // Write the contents of the memory chunk to the file
+            wavFile.write(chunk.memory, chunk.size);
+            wavFile.close();
+            // Optional: Log success
+            // printf("Successfully saved audio to %s\n", wavPath.c_str());
+        } else {
+            fprintf(stderr, "Error: Could not open file for writing: %s\n", wavPath.c_thread());
+            wavPath = ""; // Clear path on failure
+        }
     }
 
-    // 清理
+    // Cleanup
     free(chunk.memory);
     curl_easy_cleanup(curl);
   }
