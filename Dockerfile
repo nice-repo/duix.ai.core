@@ -36,7 +36,7 @@ FROM ubuntu:22.04
 COPY --from=builder /app /app
 VOLUME /root/.cache/uv
 ENV DEBIAN_FRONTEND=noninteractive
-ENV MINIMAX_API_KEY=${MINIMAX_API_KEY} \
+ENV GROQ_API_KEY=${GROQ_API_KEY} \
     LM_API_KEY=${LM_API_KEY}
 ENV PATH="/root/.local/bin:${PATH}"
 ENV PATH="/app/.venv/bin:/root/.local/bin:${PATH}"
