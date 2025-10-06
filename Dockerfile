@@ -80,14 +80,15 @@ RUN if [ ! -d "gj_dh_res" ]; then \
     unzip -q gj_dh_res.zip && rm gj_dh_res.zip; \
     fi && \
     if [ ! -d "roles/SiYao" ]; then \
-    wget -q --no-check-certificate https://digital-public.obs.cn-east-3.myhuaweicloud.com/duix/digital/model/1719194450521/siyao_2024018.zip && \
-    unzip -q siyao_2024018.zip && mv siyao_2024018 "roles/SiYao" && rm siyao_2024018.zip; \
+    # FIX: Corrected the typo in the URL from '...2024018.zip' to '...20240418.zip'
+    wget -q --no-check-certificate https://digital-public.obs.cn-east-3.myhuaweicloud.com/duix/digital/model/1719194450521/siyao_20240418.zip && \
+    unzip -q siyao_20240418.zip && mv siyao_20240418 "roles/SiYao" && rm siyao_20240418.zip; \
     fi && \
     if [ ! -d "roles/DearSister" ]; then \
     wget -q --no-check-certificate https://digital-public.obs.cn-east-3.myhuaweicloud.com/duix/digital/model/1719194007931/bendi1_0329.zip && \
     unzip -q bendi1_0329.zip && mv bendi1_0329 "roles/DearSister" && rm bendi1_0329.zip; \
     fi
-
+    
 # -- Install Python dependencies. This layer is only rebuilt if requirements.txt changes.
 WORKDIR /app/audio
 COPY requirements.txt /app/audio/requirements.txt
