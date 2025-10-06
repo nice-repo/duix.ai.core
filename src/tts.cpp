@@ -168,8 +168,7 @@ std::string tts(const std::string &text, const std::string &voice) {
   std::string wavPath = "";
 
   if (curl) {
-    std::string url =
-         std::string url = "https://api.groq.com/openai/v1/audio/speech";
+	 std::string url = "https://api.groq.com/openai/v1/audio/speech";
     // 设置请求URL
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 
@@ -213,7 +212,7 @@ std::string tts(const std::string &text, const std::string &voice) {
             // Optional: Log success
             // printf("Successfully saved audio to %s\n", wavPath.c_str());
         } else {
-            fprintf(stderr, "Error: Could not open file for writing: %s\n", wavPath.c_thread());
+            fprintf(stderr, "Error: Could not open file for writing: %s\n", wavPath.c_str()());
             wavPath = ""; // Clear path on failure
         }
     }
