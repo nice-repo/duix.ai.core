@@ -96,6 +96,7 @@ RUN curl -LsS https://astral.sh/uv/install.sh | sh \
     && uv init . && uv venv \
     && uv add -r /app/audio/requirements.txt \
     && mkdir -p models \
+    # THIS LINE BUILDS THE MODEL INTO YOUR IMAGE
     && bash hfd.sh FunAudioLLM/SenseVoiceSmall \
     && mkdir -p /root/.cache && chmod 777 /root/.cache
     
