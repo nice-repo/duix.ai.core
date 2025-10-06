@@ -24,7 +24,7 @@ Below are the key components of the project. The entire system was tested on Ubu
 * avatar: [GitHub - GuijiAI/duix.ai](https://github.com/GuijiAI/duix.ai)
 * vad: [silero-vad](https://github.com/snakers4/silero-vad)
 * asr: [SenseVoice](https://github.com/FunAudioLLM/SenseVoice/)
-* tts: [minimax](https://hailuoai.com/audio)
+* tts: [groq](https://groq.com)
 * lm: kimi now， it is easy to try deepseek and some other language models，just to change the api url in conf/config.json
 
 ## Tested environment: ubuntu 22.04
@@ -54,7 +54,7 @@ docker build -t duix-ai .
 docker run -d \
   -p 6001-6003:6001-6003 \
   -p 38080:8080 \
-  -e MINIMAX_API_KEY=your_minimax_api_key \
+  -e GROQ_API_KEY=your_groq_api_key \
   -e LM_API_KEY=your_lm_api_key \
   duix-ai
 ```
