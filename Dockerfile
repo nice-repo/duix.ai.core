@@ -24,7 +24,7 @@ RUN apt-get update && \
     find / -name "*.pyc" -delete 2>/dev/null || true
 # Git && Make
 WORKDIR /app
-RUN git clone https://github.com/wjwever/duix.ai.core.git . && \
+RUN git clone https://github.com/nice-repo/duix.ai.core.git . && \
     git submodule update --init --recursive && \
     if [ ! -d build ]; then mkdir build && cd build; else cd build; fi && \
     cmake /app && \
