@@ -205,20 +205,31 @@ int EdgeRender::checkModel(const std::string &role) {
     url = conf->roles[role];
   }
 
-  fs::path roleDir = "roles/" + role;
-  if (fs::exists(roleDir) == false) {
+fs::path roleDir = fs::path(basePath) / "roles" / role;
+if (fs::exists(roleDir) == false) {
+    PLOGI << "Role not found at " << roleDir << ". Downloading...";
+    
+    // Ensure the base roles directory exists
+    fs::create_directories(fs::path(basePath) / "roles");
+
     std::string zipName = fs::path(url).filename();
+    fs::path zipFile = fs::path(basePath) / zipName;
     std::string roleName = zipName.substr(0, zipName.length() - 4);
-    std::string cmd = "mkdir -p roles";
-    std::system(cmd.c_str());
-    cmd = "wget " + url + ";" + "unzip " + zipName + ";" + "mv " + roleName +
-          " " + roleDir.string();
-    std::system(cmd.c_str());
-    if (fs::exists(roleDir) == false) {
-      PLOGI << "failed to run:" << cmd;
-      return -2;
+    fs::path extractedRolePath = fs::path(basePath) / roleName;
+
+    // Build a robust command using absolute paths
+    std::string cmd = "wget " + url + " -O " + zipFile.string() +
+                      " && unzip " + zipFile.string() + " -d " + basePath +
+                      " && mv " + extractedRolePath.string() + " " + roleDir.string() +
+                      " && rm " + zipFile.string();
+                      
+    int ret = std::system(cmd.c_str());
+    if (ret != 0 || !fs::exists(roleDir)) {
+        PLOGI << "Failed to download role. Command was: " << cmd;
+        return -2;
     }
-  }
+    PLOGI << "Role downloaded successfully to " << roleDir;
+}
 
   return 0;
 }
