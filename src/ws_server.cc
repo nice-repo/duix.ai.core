@@ -107,11 +107,26 @@ _lmClient->onSubText = [this](const std::vector<std::string> &array) {
     return 0;
   }
   void chat(const std::string &query) {
+    // Check if the renderer exists and the query is not empty.
+    if (_render && !query.empty()) {
+        PLOGI << "Forwarding query to TTS engine: " << query;
+        
+        // Create an asynchronous task to call the TTS function.
+        // This generates the audio file for the text.
+        auto fut_for_renderer = std::async(std::launch::async, tts::tts, query, "tianxin_xiaoling");
+        
+        // Push the task into the renderer's queue to be processed for lip-syncing.
+        _render->_ttsTasks.push(fut_for_renderer);
+    }
+    
+    // The original LmClient call is commented out to ensure the text is spoken directly.
+    // You can re-enable it if you want to get a response from a language model as well.
+    /*
     if (_lmClient) {
-      // TODO use thread pool later
       std::thread th(&LmClient::request, this->_lmClient, query);
       th.detach();
     }
+    */
   }
 };
 
