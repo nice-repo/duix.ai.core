@@ -69,7 +69,7 @@ RUN if [ ! -d "gj_dh_res" ]; then \
 # ---- Layer 3: Python Dependencies (Changes only when requirements.txt does) ----
 WORKDIR /app/audio
 COPY requirements.txt /app/audio/requirements.txt
-COPY hfd.sh /app/audio/hfd.sh
+COPY audio/hfd.sh /app/audio/hfd.sh
 RUN curl -LsS https://astral.sh/uv/install.sh | sh && \
     uv init && \
     uv venv && \
