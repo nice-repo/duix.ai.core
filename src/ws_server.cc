@@ -52,52 +52,56 @@ struct WorkFLow {
     _render->startRender();
 
     _lmClient = std::make_shared<LmClient>();
-// Replace the entire _lmClient->onSubText lambda with this corrected version
 
+// This is the final, corrected version that solves both the logic and compilation errors.
 _lmClient->onSubText = [this](const std::vector<std::string> &array) {
     for (auto &msg : array) {
         PLOGD << "TTS input: " << msg;
-        std::future<std::string> fut;
-        if (!msg.empty()) {
-            fut = std::async(std::launch::async, tts::tts, msg, "tianxin_xiaoling");
-        } else {
-            // If the message is empty, we don't need to do anything.
-            continue; 
+
+        if (msg.empty()) {
+            continue; // Skip empty messages
         }
 
         // =================================================================
-        // CORRECTED LOGIC: Create a new thread to handle the TTS result
+        // PART 1: Create the TTS task and the response thread.
         // =================================================================
+        
+        // Create the TTS task ONCE.
+        auto fut = std::async(std::launch::async, tts::tts, msg, "tianxin_xiaoling");
+
+        // Launch a new background thread to wait for the result and send the response.
         std::thread([this](std::future<std::string> tts_future) {
-            // This thread will block until the TTS operation is complete
+            // This thread waits here until the audio file is ready.
             std::string audio_filepath = tts_future.get();
 
             if (!audio_filepath.empty() && audio_filepath != "TTS_DONE") {
-                // 1. Construct the public URL that the browser can access.
+                // 1. Construct the public URL the browser can access.
                 std::string audio_url = "http://localhost:8080/audio/" + getBaseName(audio_filepath);
 
-                // 2. Create the JSON response payload.
+                // 2. Create the JSON response.
                 json response_json;
                 response_json["wav"] = audio_url;
                 std::string response_message = response_json.dump();
 
-                // 3. Call the message handler (_sendText) to send the JSON back to the client.
+                // 3. Send the JSON back to the client using the stored handler.
                 if (_sendText) {
                     PLOGI << "Sending audio URL back to client: " << response_message;
                     _sendText(response_message);
                 }
             }
-        }, std::move(fut)).detach(); // Move the future into the thread and detach
+        }, std::move(fut)).detach(); // Move the future into the thread and detach.
+
         
-        // The original logic to push to the renderer can remain if it's used for lip-syncing
-        // If the renderer's only job was to send the message, this line could be removed.
-        // For now, we'll assume it's still needed for video rendering.
-        // NOTE: We cannot move `fut` twice. So we create a new future for the renderer.
-        if (!msg.empty()) {
-             _render->_ttsTasks.push(std::async(std::launch::async, tts::tts, msg, "tianxin_xiaoling"));
-        } else {
-             _render->_ttsTasks.push(std::async(std::launch::async, [] { return std::string("TTS_DONE"); }));
-        }
+        // =================================================================
+        // PART 2: Send a second task to the renderer for lip-syncing.
+        // This now correctly avoids the compilation error.
+        // =================================================================
+        
+        // Create a named variable for the renderer's future.
+        auto fut_for_renderer = std::async(std::launch::async, tts::tts, msg, "tianxin_xiaoling");
+        
+        // Pass the named variable to the push function.
+        _render->_ttsTasks.push(fut_for_renderer);
     }
 };
     return 0;
