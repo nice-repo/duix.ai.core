@@ -88,7 +88,7 @@ class FunASR():
             res = self.model.generate(
                 input=audio_data,  # This is now a float32 NumPy array
                 cache={},
-                language="zn",  # "zn", "en", "yue", "ja", "ko", "nospeech"
+                language="en",  # "zn", "en", "yue", "ja", "ko", "nospeech"
                 use_itn=True,
                 batch_size_s=60,
                 merge_vad=True,
