@@ -29,6 +29,8 @@ using websocketpp::lib::bind;
 using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
 
+// In ws_server.cc
+
 struct WorkFLow {
   std::shared_ptr<LmClient> _lmClient = nullptr;
   std::shared_ptr<EdgeRender> _render = nullptr;
@@ -66,16 +68,19 @@ struct WorkFLow {
                 std::string audio_filepath = tts_future.get();
                 if (!audio_filepath.empty() && audio_filepath != "TTS_DONE") {
                     
-                    // 1. Get just the filename from the full path.
+                    // --- FIX STARTS HERE ---
+                    // 1. Get just the filename (e.g., "Yeah.wav") from the full path (/app/audio/Yeah.wav).
                     std::string audio_filename = getBaseName(audio_filepath);
 
                     // 2. Construct the correct URL. The HTTP server maps the web path "/audio"
                     //    to the file system path "/app/audio".
                     std::string audio_url = "http://localhost:8080/audio/" + audio_filename;
-                    
+                    // --- FIX ENDS HERE ---
+
                     json response_json;
                     response_json["wav"] = audio_url;
                     std::string response_message = response_json.dump();
+                    
                     if (_sendText) {
                         PLOGI << "Sending audio URL back to client: " << response_message;
                         _sendText(response_message);
