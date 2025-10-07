@@ -5,6 +5,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <random>
+#include <regex> // Include for std::regex_replace
 
 #include "audio.h"
 #include "config.h"
@@ -120,6 +121,23 @@ static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb,
   return realsize;
 }
 
+// Helper function to create a safe, absolute filename
+static std::string createSafeFilename(const std::string& text) {
+    std::string safe_text = text;
+    // Replace spaces with underscores
+    std::replace(safe_text.begin(), safe_text.end(), ' ', '_');
+    // Remove any character that is not a letter, number, or underscore
+    safe_text = std::regex_replace(safe_text, std::regex("[^a-zA-Z0-9_]"), "");
+    // Prevent excessively long filenames
+    if (safe_text.length() > 50) {
+        safe_text = safe_text.substr(0, 50);
+    }
+    
+    // --- FIX: Use the absolute path /app/audio/ ---
+    return "/app/audio/" + safe_text + ".wav";
+}
+
+
 namespace tts {
 
 //new...
@@ -147,9 +165,11 @@ std::string pack(const std::string &text, const std::string &voice) {
 // Sends the TTS request to the Groq API.
 std::string tts(const std::string &text, const std::string &voice) {
   Timer t("tts " + text);
-  std::string wav = "./audio/" + text + ".wav";
+  std::string wavPath = createSafeFilename(text);
+	
+  
   if (std::filesystem::exists(wav)) {
-    return wav;
+    return wavPath;
   }
 
   auto *config = config::get();
@@ -194,39 +214,28 @@ std::string tts(const std::string &text, const std::string &voice) {
 
     // 检查错误
     if (res != CURLE_OK) {
-      fprintf(stderr, "curl_easy_perform() failed: %s\n",
-              curl_easy_strerror(res));
-    } else {
-      // SUCCESS: The raw audio data is in chunk.memory.
-        // Write this data directly to a file.
-        
-        // Define the output file path
-        wavPath = "./audio/" + text + ".wav"; // Assuming this is your desired path
-
-        // Open a file stream in binary mode
-        std::ofstream wavFile(wavPath, std::ios::binary);
-        if (wavFile.is_open()) {
-            // Write the contents of the memory chunk to the file
-            wavFile.write(chunk.memory, chunk.size);
-            wavFile.close();
-            // Optional: Log success
-            // printf("Successfully saved audio to %s\n", wavPath.c_str());
-        } else {
-            fprintf(stderr, "Error: Could not open file for writing: %s\n", wavPath.c_str());
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
             wavPath = ""; // Clear path on failure
+        } else {
+            std::ofstream wavFile(wavPath, std::ios::binary);
+            if (wavFile.is_open()) {
+                wavFile.write(chunk.memory, chunk.size);
+                wavFile.close();
+            } else {
+                fprintf(stderr, "Error: Could not open file for writing: %s\n", wavPath.c_str());
+                wavPath = ""; // Clear path on failure
+            }
         }
+
+        free(chunk.memory);
+        curl_easy_cleanup(curl);
+    }
+    
+    if (headers) {
+        curl_slist_free_all(headers);
     }
 
-    // Cleanup
-    free(chunk.memory);
-    curl_easy_cleanup(curl);
-  }
-
-  curl_slist_free_all(headers);
-
-  // in main
-  // curl_global_cleanup();
-  return wavPath;
+    return wavPath;
 }
 
 } // namespace tts
