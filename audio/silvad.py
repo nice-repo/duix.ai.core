@@ -4,11 +4,12 @@ import torch
 import sys
 import wave
 import math
-import time  
+import time
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
 
+# This commented-out section is untouched
 # class ASR():
 #     @staticmethod
 #     def _save_audio_to_file(audio_data, file_path):
@@ -32,28 +33,52 @@ from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
 class FunASR():
     def __init__(self):
-        self.model_dir = "models/SenseVoiceSmall"
+        self.model_dir = "/app/audio/SenseVoiceSmall"
         self.output_dir = "tmp"
 
         self.model = AutoModel(
             model=self.model_dir,
             vad_kwargs={"max_single_segment_time": 30000},
             disable_update=True,
-            hub="hf"
+            #hub="hf" # <--- This is the problem line
             # device="cuda:0",  # 如果有GPU，可以解开这行并指定设备
         )
-    def recognizer(self, audio):
-        try:
-            # res = self.model.generate(
-            #     input=audio,
-            #     cache={},
-            #     language="zn",  # 语言选项: "zn", "en", "yue", "ja", "ko", "nospeech"
-            #     use_itn=True,
-            #     batch_size_s=60,
-            # )
 
+    # --- FIX STARTS HERE ---
+
+    def _load_wav(self, file_path: str) -> np.ndarray:
+        """Helper function to read a WAV file into a NumPy array."""
+        try:
+            with wave.open(file_path, 'rb') as wf:
+                assert wf.getframerate() == 16000, "Only 16kHz sample rate is supported"
+                assert wf.getsampwidth() == 2, "Only 16-bit audio is supported"
+                assert wf.getnchannels() == 1, "Only mono audio is supported"
+                
+                # Read all audio frames and convert to a NumPy array
+                p_frames = wf.readframes(wf.getnframes())
+                audio_data = np.frombuffer(p_frames, dtype=np.int16)
+                return audio_data
+        except Exception as e:
+            print(f"Error loading WAV file {file_path}: {e}")
+            raise
+
+    def recognizer(self, audio):
+        """
+        Recognizes speech. If 'audio' is a string, it's treated as a file path
+        and loaded. Otherwise, it's assumed to be raw audio data.
+        """
+        try:
+            # Check if the input is a file path (string)
+            if isinstance(audio, str):
+                # Load the audio data from the file path
+                audio_data = self._load_wav(audio)
+            else:
+                # Assume the input is already audio data
+                audio_data = audio
+            
+            # Now, pass the numerical audio_data to the model's generate function
             res = self.model.generate(
-                input = audio,
+                input=audio_data,  # This is now a NumPy array, not a string
                 cache={},
                 language="zn",  # "zn", "en", "yue", "ja", "ko", "nospeech"
                 use_itn=True,
@@ -69,7 +94,10 @@ class FunASR():
             print(f"ASR识别过程中发生错误: {e}")
             return ""
 
+    # --- FIX ENDS HERE ---
 
+
+    # This commented-out recognizer function is untouched
     # def recognizer(self, stream_in_audio):
     #     try:
     #         tmpfile = os.path.join(self.output_dir, f"asr-{datetime.now().date()}@{uuid.uuid4().hex}.wav")
@@ -91,6 +119,7 @@ class FunASR():
     #         logger.error(f"ASR识别过程中发生错误: {e}")
     #         return None, None
 
+# The SileroVAD class is untouched
 class SileroVAD():
     def __init__(self):
         self.model = load_silero_vad()
@@ -98,9 +127,9 @@ class SileroVAD():
         self.threshold = 0.5
         self.min_silence_duration_ms = 200
         self.vad_iterator = VADIterator(self.model,
-                            threshold=self.threshold,
-                            sampling_rate=self.sampling_rate,
-                            min_silence_duration_ms=self.min_silence_duration_ms)
+                                        threshold=self.threshold,
+                                        sampling_rate=self.sampling_rate,
+                                        min_silence_duration_ms=self.min_silence_duration_ms)
         print(f"VAD Iterator initialized with model {self.model}")
 
     @staticmethod
@@ -143,6 +172,7 @@ class SileroVAD():
         except Exception as e:
             print(f"Error resetting VAD states: {e}")
 
+# The read_wav_in_chunks function is untouched
 def read_wav_in_chunks(wav_file, chunk_size=1024):
     """
     读取 WAV 文件并按指定大小分割成 chunks
@@ -185,6 +215,7 @@ def read_wav_in_chunks(wav_file, chunk_size=1024):
             # 这里我们直接返回实际数据
             yield frames
 
+# The __main__ block is untouched
 if __name__ == "__main__":
     vad = SileroVAD()
     wav_file = sys.argv[1]
@@ -198,5 +229,4 @@ if __name__ == "__main__":
         print(i * 512, end=" ")
         if len(chunk) == 1024:
             print(vad.is_vad(chunk))
-
-
+            
