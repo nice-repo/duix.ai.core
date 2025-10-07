@@ -178,12 +178,12 @@ int EdgeRender::checkModel(const std::string &role) {
     
   
     if (fs::exists(modelDir) == false) {
-    PLOGI << "Resource directory not found at " << modelDir << ". Downloading...";
+    PLOGI << "Resource directory not found at " << modelDir << ". Downing...";
     
-    // 4. Build a robust command that downloads and unzips to the absolute path.
+    // 4. Build a robust command that downs and unzips to the absolute path.
     //    - `wget -O`: Specifies the exact output file path.
     //    - `unzip -d`: Specifies the directory to extract files into.
-    //    - `rm`: Cleans up the downloaded zip file.
+    //    - `rm`: Cleans up the downed zip file.
     std::string cmd = "wget " + url + " -O " + zipFile.string() +
                       " && unzip " + zipFile.string() + " -d " + basePath +
                       " && rm " + zipFile.string();
