@@ -15,6 +15,15 @@
 #include <websocketpp/server.hpp>
 using json = nlohmann::json;
 
+// ADD THIS HELPER FUNCTION
+std::string getBaseName(const std::string& path) {
+    size_t pos = path.find_last_of("/\\");
+    if (pos != std::string::npos) {
+        return path.substr(pos + 1);
+    }
+    return path;
+}
+
 typedef websocketpp::server<websocketpp::config::asio> server;
 using websocketpp::connection_hdl;
 using websocketpp::lib::bind;
@@ -34,6 +43,8 @@ struct WorkFLow {
   int init(std::function<void(std::vector<uint8_t> &data)> imgHdl,
            std::function<void(const std::string &msg)> msgHdl,
            const std::string &role = "SiYao") {
+    
+    _sendText = msgHdl; // ADD THIS LINE to store the message handler
     _render = std::make_shared<EdgeRender>();
     _render->setImgHdl(imgHdl);
     _render->setMsgHdl(msgHdl);
@@ -41,21 +52,54 @@ struct WorkFLow {
     _render->startRender();
 
     _lmClient = std::make_shared<LmClient>();
-    _lmClient->onSubText = [this](const std::vector<std::string> &array) {
-      thread_local int i = 0;
-      for (auto &msg : array) {
-        PLOGD << i++ << " tts:" << msg;
+// Replace the entire _lmClient->onSubText lambda with this corrected version
+
+_lmClient->onSubText = [this](const std::vector<std::string> &array) {
+    for (auto &msg : array) {
+        PLOGD << "TTS input: " << msg;
         std::future<std::string> fut;
-        if (msg.size() > 0) {
-          fut =
-              std::async(std::launch::async, tts::tts, msg, "tianxin_xiaoling");
+        if (!msg.empty()) {
+            fut = std::async(std::launch::async, tts::tts, msg, "tianxin_xiaoling");
         } else {
-          fut = std::async(std::launch::async,
-                           [] { return std::string("TTS_DONE"); });
+            // If the message is empty, we don't need to do anything.
+            continue; 
         }
-        _render->_ttsTasks.push(fut);
-      }
-    };
+
+        // =================================================================
+        // CORRECTED LOGIC: Create a new thread to handle the TTS result
+        // =================================================================
+        std::thread([this](std::future<std::string> tts_future) {
+            // This thread will block until the TTS operation is complete
+            std::string audio_filepath = tts_future.get();
+
+            if (!audio_filepath.empty() && audio_filepath != "TTS_DONE") {
+                // 1. Construct the public URL that the browser can access.
+                std::string audio_url = "http://localhost:8080/audio/" + getBaseName(audio_filepath);
+
+                // 2. Create the JSON response payload.
+                json response_json;
+                response_json["wav"] = audio_url;
+                std::string response_message = response_json.dump();
+
+                // 3. Call the message handler (_sendText) to send the JSON back to the client.
+                if (_sendText) {
+                    PLOGI << "Sending audio URL back to client: " << response_message;
+                    _sendText(response_message);
+                }
+            }
+        }, std::move(fut)).detach(); // Move the future into the thread and detach
+        
+        // The original logic to push to the renderer can remain if it's used for lip-syncing
+        // If the renderer's only job was to send the message, this line could be removed.
+        // For now, we'll assume it's still needed for video rendering.
+        // NOTE: We cannot move `fut` twice. So we create a new future for the renderer.
+        if (!msg.empty()) {
+             _render->_ttsTasks.push(std::async(std::launch::async, tts::tts, msg, "tianxin_xiaoling"));
+        } else {
+             _render->_ttsTasks.push(std::async(std::launch::async, [] { return std::string("TTS_DONE"); }));
+        }
+    }
+};
     return 0;
   }
   void chat(const std::string &query) {
