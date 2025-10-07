@@ -171,9 +171,19 @@ async def main():
     await server.wait_closed()
 
 if __name__ == "__main__":
-    asr = ASR.recognizer("/app/audio/test.wav")
-    print(asr)
-    if asr != "关注自我成长，享受生活。":
-        print("asr self test error, please check")
-        exit(0)
+    # The global instance 'ASR' is already created. We use it directly.
+    # We call the 'recognizer' method ON THE INSTANCE, not the class.
+    print("--- Running ASR Self-Test ---")
+    recognized_text = ASR.recognizer("/app/audio/test.wav")
+    print(f"Self-test recognized text: {recognized_text}")
+
+    # Compare the result to the expected text
+    expected_text = "关注自我成长，享受生活。"
+    if recognized_text != expected_text:
+        print(f"ASR self test error, please check. Expected: '{expected_text}', Got: '{recognized_text}'")
+        exit(1) # Use a non-zero exit code for errors
+    else:
+        print("ASR self-test passed!")
+
+    # Start the websocket server after the test passes
     asyncio.get_event_loop().run_until_complete(main())
