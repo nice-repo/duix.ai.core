@@ -169,16 +169,33 @@ int EdgeRender::checkModel(const std::string &role) {
   static std::mutex mx;
   std::lock_guard<std::mutex> lock(mx);
 
-  fs::path model = "gj_dh_res";
-  std::string url = "https://cdn.guiji.ai/duix/location/gj_dh_res.zip";
-  if (fs::exists(model) == false) {
-    std::string cmd = "wget " + url + ";unzip gj_dh_res.zip";
-    std::system(cmd.c_str());
-    if (fs::exists(model) == false) {
-      PLOGI << "failed to run command:" << cmd;
-      return -1;
+    const std::string basePath = "/app/";
+
+    // 2. Create absolute paths for the model directory and the zip file.
+    fs::path modelDir = basePath + "gj_dh_res";
+    fs::path zipFile = basePath + "gj_dh_res.zip";
+    std::string url = "https://cdn.guiji.ai/duix/location/gj_dh_res.zip";
+    
+  
+    if (fs::exists(modelDir) == false) {
+    PLOGI << "Resource directory not found at " << modelDir << ". Downloading...";
+    
+    // 4. Build a robust command that downloads and unzips to the absolute path.
+    //    - `wget -O`: Specifies the exact output file path.
+    //    - `unzip -d`: Specifies the directory to extract files into.
+    //    - `rm`: Cleans up the downloaded zip file.
+    std::string cmd = "wget " + url + " -O " + zipFile.string() +
+                      " && unzip " + zipFile.string() + " -d " + basePath +
+                      " && rm " + zipFile.string();
+
+    // Execute the command
+    int ret = std::system(cmd.c_str());
+    if (ret != 0 || fs::exists(modelDir) == false) {
+        PLOGI << "Failed to download or extract resources. Command was: " << cmd;
+        return -1;
     }
-  }
+    PLOGI << "Resources downloaded successfully.";
+}
 
   auto conf = config::get();
   if (conf->roles.count(role) == 0) {
