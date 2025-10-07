@@ -235,120 +235,127 @@ if (fs::exists(roleDir) == false) {
 }
 
 int EdgeRender::load(const std::string &role) {
-  std::string baseDir = "gj_dh_res";
-  std::string modelDir = "roles/" + role;
-  if (checkModel(role) != 0) {
-    return -1;
-  };
-  for (const auto &p : _baseMD5Map) {
-    auto &key = p.first;
-    auto &value = p.second;
-    fs::path file = baseDir + "/" + value;
-    if (fs::exists(file) == false) {
-      fs::path newFile = baseDir + "/" + key;
-      PLOGI << "convert " << newFile.string() << " to " << file.string();
-      if (!fs::exists(newFile)) {
-        PLOGI << "cant find " << newFile.string();
+    // --- FIX START ---
+    // Define the absolute base path for all resources.
+    const std::string basePath = "/app/";
+    // Construct absolute paths for the resource directories.
+    std::string baseDir = basePath + "gj_dh_res";
+    std::string modelDir = basePath + "roles/" + role;
+    // --- FIX END ---
+
+    if (checkModel(role) != 0) {
         return -1;
-      }
-      int ret = mainenc(0, const_cast<char *>(newFile.string().c_str()),
-                        const_cast<char *>(file.string().c_str()));
-      PLOGI << "convert result:" << ret;
+    };
+
+    // The rest of the function now works correctly because all file operations
+    // below use the corrected absolute paths defined in `baseDir` and `modelDir`.
+    for (const auto &p : _baseMD5Map) {
+        auto &key = p.first;
+        auto &value = p.second;
+        fs::path file = fs::path(baseDir) / value;
+        if (fs::exists(file) == false) {
+            fs::path newFile = fs::path(baseDir) / key;
+            PLOGI << "convert " << newFile.string() << " to " << file.string();
+            if (!fs::exists(newFile)) {
+                PLOGI << "cant find " << newFile.string();
+                return -1;
+            }
+            int ret = mainenc(0, const_cast<char *>(newFile.string().c_str()),
+                              const_cast<char *>(file.string().c_str()));
+            PLOGI << "convert result:" << ret;
+        }
     }
-  }
-  for (const auto &p : _modelMD5Map) {
-    auto &key = p.first;
-    auto &value = p.second;
-    fs::path file = modelDir + "/" + value;
-    if (fs::exists(file) == false) {
-      fs::path newFile = modelDir + "/" + key;
-      PLOGI << "convert " << newFile.string() << " to " << file.string();
-      if (!fs::exists(newFile)) {
-        PLOGI << "cant find " << newFile.string();
-        return -1;
-      }
-      int ret = mainenc(0, const_cast<char *>(newFile.string().c_str()),
-                        const_cast<char *>(file.string().c_str()));
-      PLOGI << "convert result:" << ret;
+    for (const auto &p : _modelMD5Map) {
+        auto &key = p.first;
+        auto &value = p.second;
+        fs::path file = fs::path(modelDir) / value;
+        if (fs::exists(file) == false) {
+            fs::path newFile = fs::path(modelDir) / key;
+            PLOGI << "convert " << newFile.string() << " to " << file.string();
+            if (!fs::exists(newFile)) {
+                PLOGI << "cant find " << newFile.string();
+                return -1;
+            }
+            int ret = mainenc(0, const_cast<char *>(newFile.string().c_str()),
+                              const_cast<char *>(file.string().c_str()));
+            PLOGI << "convert result:" << ret;
+        }
     }
-  }
-  std::ifstream bbox(modelDir + "/" + _modelMD5Map["bbox.j"]);
-  json boxJson = json::parse(bbox);
 
-  std::ifstream config(modelDir + "/" + _modelMD5Map["config.j"]);
-  json configJson = json::parse(config);
+    std::ifstream bbox(fs::path(modelDir) / _modelMD5Map["bbox.j"]);
+    json boxJson = json::parse(bbox);
 
-  _modelInfo._hasMask = configJson.value("need_png", 0) == 0 and
-                        fs::exists(modelDir + "/raw_jpgs") and
-                        fs::exists(modelDir + "/raw_sg") and
-                        fs::exists(modelDir + "/pha");
+    std::ifstream config(fs::path(modelDir) / _modelMD5Map["config.j"]);
+    json configJson = json::parse(config);
 
-  PLOGI << "hasMask:" << _modelInfo._hasMask;
-  for (int i = 1;; ++i) {
-    auto rawPath = modelDir + "/raw_jpgs/" + std::to_string(i) + ".sij"; //
-    auto maskPath = modelDir + "/pha/" + std::to_string(i) + ".sij";
-    auto sgPath = modelDir + "/raw_sg/" + std::to_string(i) + ".sij"; // front
-    if (fs::exists(rawPath) == false) {
-      break;
+    _modelInfo._hasMask = configJson.value("need_png", 0) == 0 &&
+                          fs::exists(fs::path(modelDir) / "raw_jpgs") &&
+                          fs::exists(fs::path(modelDir) / "raw_sg") &&
+                          fs::exists(fs::path(modelDir) / "pha");
+
+    PLOGI << "hasMask:" << _modelInfo._hasMask;
+    for (int i = 1;; ++i) {
+        auto rawPath = fs::path(modelDir) / "raw_jpgs" / (std::to_string(i) + ".sij");
+        auto maskPath = fs::path(modelDir) / "pha" / (std::to_string(i) + ".sij");
+        auto sgPath = fs::path(modelDir) / "raw_sg" / (std::to_string(i) + ".sij");
+        if (fs::exists(rawPath) == false) {
+            break;
+        }
+        Frame frame;
+        frame.index = i;
+        frame._rawPath = rawPath.string();
+        if (_modelInfo._hasMask && fs::exists(maskPath)) {
+            frame._maskPath = maskPath.string();
+        }
+        if (_modelInfo._hasMask && fs::exists(sgPath)) {
+            frame._sgPath = sgPath.string();
+        }
+        if (boxJson.count(std::to_string(i))) {
+            frame.rect[0] = boxJson[std::to_string(i)][0];
+            frame.rect[1] = boxJson[std::to_string(i)][2];
+            frame.rect[2] = boxJson[std::to_string(i)][1];
+            frame.rect[3] = boxJson[std::to_string(i)][3];
+        }
+        _modelInfo._frames.push_back(frame);
     }
-    Frame frame;
-    frame.index = i;
-    frame._rawPath = rawPath;
-    if (_modelInfo._hasMask and fs::exists(maskPath)) {
-      frame._maskPath = maskPath;
+    if (_modelInfo._frames.size() == 0) {
+        return -2;
     }
-    if (_modelInfo._hasMask and fs::exists(sgPath)) {
-      frame._sgPath = sgPath;
+
+    _modelInfo._width = configJson.value("width", 0);
+    _modelInfo._height = configJson.value("height", 0);
+
+    json ncnnConfig;
+    ncnnConfig["action"] = 1;
+    ncnnConfig["videowidth"] = _modelInfo._width;
+    ncnnConfig["videoheight"] = _modelInfo._height;
+    ncnnConfig["timeoutms"] = 5000;
+    ncnnConfig["wenetfn"] = fs::path(baseDir) / "wo";
+    if (fs::exists(fs::path(modelDir) / "wb")) {
+        PLOGI << "使用模型自带的weight:" << fs::path(modelDir) / "wb";
+        ncnnConfig["unetmsk"] = fs::path(modelDir) / "wb";
+    } else {
+        ncnnConfig["unetmsk"] = fs::path(baseDir) / "wb";
     }
-    if (boxJson.count(std::to_string(i))) {
-      frame.rect[0] = boxJson[std::to_string(i)][0];
-      frame.rect[1] = boxJson[std::to_string(i)][2];
-      frame.rect[2] = boxJson[std::to_string(i)][1];
-      frame.rect[3] = boxJson[std::to_string(i)][3];
-    }
-    // PLOGI << frame.toString();
-    _modelInfo._frames.push_back(frame);
-  }
-  if (_modelInfo._frames.size() == 0) {
-    return -2;
-  }
+    ncnnConfig["cacertfn"] = fs::path(baseDir) / "cp";
+    ncnnConfig["alphabin"] = fs::path(baseDir) / "ab";
+    ncnnConfig["alphaparam"] = fs::path(baseDir) / "ap";
 
-  _modelInfo._width = configJson.value("width", 0);
-  _modelInfo._height = configJson.value("height", 0);
+    ncnnConfig["unetbin"] = fs::path(modelDir) / "db";
+    ncnnConfig["unetparam"] = fs::path(modelDir) / "dp";
+    PLOGI << "ncnnConfig:" << ncnnConfig.dump();
 
-  //  TODO 处理动作
+    _modelInfo._ncnnConfig = ncnnConfig.dump();
 
-  json ncnnConfig;
-  ncnnConfig["action"] = 1;
-  ncnnConfig["videowidth"] = _modelInfo._width;
-  ncnnConfig["videoheight"] = _modelInfo._height;
-  ncnnConfig["timeoutms"] = 5000;
-  ncnnConfig["wenetfn"] = baseDir + "/wo";
-  if (fs::exists(modelDir + "/wb")) {
-    PLOGI << "使用模型自带的weight:" << modelDir + "/wb";
-    ncnnConfig["unetmsk"] = modelDir + "/wb";
-  } else {
-    ncnnConfig["unetmsk"] = baseDir + "/wb";
-  }
-  ncnnConfig["cacertfn"] = baseDir + "/cp";
-  ncnnConfig["alphabin"] = baseDir + "/ab";
-  ncnnConfig["alphaparam"] = baseDir + "/ap";
+    MessageCb *cb = nullptr;
+    _digit = std::make_unique<GDigit>(_modelInfo._width, _modelInfo._height, cb);
 
-  ncnnConfig["unetbin"] = modelDir + "/db";
-  ncnnConfig["unetparam"] = modelDir + "/dp";
-  PLOGI << "ncnnConfig:" << ncnnConfig.dump();
+    PLOGI << "digit config:" << _digit->config(_modelInfo._ncnnConfig.c_str());
+    _digit->start();
+    PLOGI << "width:" << _modelInfo._width << " height:" << _modelInfo._height;
+    PLOGI << "模型初始化完成";
 
-  _modelInfo._ncnnConfig = ncnnConfig.dump();
-
-  MessageCb *cb = nullptr;
-  _digit = std::make_unique<GDigit>(_modelInfo._width, _modelInfo._height, cb);
-
-  PLOGI << "digit config:" << _digit->config(_modelInfo._ncnnConfig.c_str());
-  _digit->start();
-  PLOGI << "width:" << _modelInfo._width << " height:" << _modelInfo._height;
-  PLOGI << "模型初始化完成";
-
-  return 0;
+    return 0;
 }
 
 std::string EdgeRender::render(const std::string &input) {
