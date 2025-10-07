@@ -1,6 +1,6 @@
 # #############################################################################
 # Stage 1: Builder
-# Compiles the C++ application. This stage runs only when its source changes.
+# Compiles the C++ application from the local source code.
 # #############################################################################
 FROM ubuntu:22.04 AS builder
 
@@ -14,17 +14,21 @@ RUN apt-get update && \
     libcurl4-openssl-dev aria2 ffmpeg libopencv-dev libboost-all-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Clone and build the application
 WORKDIR /app
-RUN git clone https://github.com/nice-repo/duix.ai.core.git . && \
-    git submodule update --init --recursive && \
+
+# ---- CHANGE: Copy local files instead of cloning ----
+# This makes the build use the code you just pulled with 'git pull'.
+COPY . .
+
+# Build the application from the copied source
+RUN git submodule update --init --recursive && \
     mkdir -p build && cd build && \
     cmake /app && \
     make -j$(nproc)
 
 # #############################################################################
 # Stage 2: Final Image
-# Creates the final, self-contained, and cache-optimized image.
+# (This stage remains the same, as it's already optimized for caching)
 # #############################################################################
 FROM ubuntu:22.04
 
@@ -49,7 +53,6 @@ RUN mkdir -p /var/log/supervisor /app/roles /app/audio /app/video
 WORKDIR /app
 
 # ---- Layer 2: Large Model Downloads (Changes very rarely) ----
-# This layer is now cached. It will NOT re-run unless you change these URLs.
 RUN if [ ! -d "gj_dh_res" ]; then \
     wget -q --no-check-certificate https://cdn.guiji.ai/duix/location/gj_dh_res.zip && \
     unzip -q gj_dh_res.zip && rm gj_dh_res.zip; \
@@ -75,9 +78,6 @@ RUN curl -LsS https://astral.sh/uv/install.sh | sh && \
     mkdir -p /root/.cache && chmod -R 777 /root/.cache
 
 # ---- Layer 4: Application Code (Changes frequently) ----
-# Because this is the LAST major step, changes to your code will only
-# cause this layer and the ones below it to be rebuilt. The layers above
-# with the heavy downloads will be reused from the cache.
 WORKDIR /app
 COPY --from=builder /app /app
 
