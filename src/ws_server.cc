@@ -65,7 +65,14 @@ struct WorkFLow {
             std::thread([this](std::future<std::string> tts_future) {
                 std::string audio_filepath = tts_future.get();
                 if (!audio_filepath.empty() && audio_filepath != "TTS_DONE") {
-                    std::string audio_url = "http://localhost:8080/audio/" + getBaseName(audio_filepath);
+                    
+                    // 1. Get just the filename from the full path.
+                    std::string audio_filename = getBaseName(audio_filepath);
+
+                    // 2. Construct the correct URL. The HTTP server maps the web path "/audio"
+                    //    to the file system path "/app/audio".
+                    std::string audio_url = "http://localhost:8080/audio/" + audio_filename;
+                    
                     json response_json;
                     response_json["wav"] = audio_url;
                     std::string response_message = response_json.dump();
