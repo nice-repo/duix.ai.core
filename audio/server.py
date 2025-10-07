@@ -171,7 +171,7 @@ async def main():
     await server.wait_closed()
 
 if __name__ == "__main__":
-    asr = ASR.recognizer("test.wav")
+    asr = ASR.recognizer("/app/audio/test.wav")
     print(asr)
     if asr != "关注自我成长，享受生活。":
         print("asr self test error, please check")
