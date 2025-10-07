@@ -47,17 +47,22 @@ class FunASR():
     # --- FIX STARTS HERE ---
 
     def _load_wav(self, file_path: str) -> np.ndarray:
-        """Helper function to read a WAV file into a NumPy array."""
+        """Helper function to read a WAV file into a float32 NumPy array."""
         try:
             with wave.open(file_path, 'rb') as wf:
                 assert wf.getframerate() == 16000, "Only 16kHz sample rate is supported"
                 assert wf.getsampwidth() == 2, "Only 16-bit audio is supported"
                 assert wf.getnchannels() == 1, "Only mono audio is supported"
                 
-                # Read all audio frames and convert to a NumPy array
+                # Read all audio frames from the WAV file
                 p_frames = wf.readframes(wf.getnframes())
-                audio_data = np.frombuffer(p_frames, dtype=np.int16)
-                return audio_data
+                # Convert the raw bytes to a NumPy array of 16-bit integers
+                audio_data_int16 = np.frombuffer(p_frames, dtype=np.int16)
+                
+                # Convert the 16-bit integer data to 32-bit float data and scale it
+                audio_data_float32 = audio_data_int16.astype(np.float32) / 32768.0
+                
+                return audio_data_float32
         except Exception as e:
             print(f"Error loading WAV file {file_path}: {e}")
             raise
@@ -70,23 +75,27 @@ class FunASR():
         try:
             # Check if the input is a file path (string)
             if isinstance(audio, str):
-                # Load the audio data from the file path
+                # Load the audio data from the file path (will be float32)
                 audio_data = self._load_wav(audio)
             else:
                 # Assume the input is already audio data
                 audio_data = audio
+                # If the raw data is int16, convert it to float32
+                if audio_data.dtype == np.int16:
+                    audio_data = audio_data.astype(np.float32) / 32768.0
             
-            # Now, pass the numerical audio_data to the model's generate function
+            # Now, pass the float32 numerical audio_data to the model
             res = self.model.generate(
-                input=audio_data,  # This is now a NumPy array, not a string
+                input=audio_data,  # This is now a float32 NumPy array
                 cache={},
                 language="zn",  # "zn", "en", "yue", "ja", "ko", "nospeech"
                 use_itn=True,
                 batch_size_s=60,
-                merge_vad=True,  #
+                merge_vad=True,
                 merge_length_s=15,
             )
 
+            # Post-process the result to get the final text
             text = rich_transcription_postprocess(res[0]["text"])
             return text
 
@@ -146,7 +155,7 @@ class SileroVAD():
             vad_output = self.vad_iterator(torch.from_numpy(audio_float32))
             if vad_output is not None:
                 pass
-                print(f"VAD output: {vad_output}")
+                # print(f"VAD output: {vad_output}") # This can be noisy, commented out
             return vad_output
         except Exception as e:
             print(f"Error in VAD processing: {e}")
@@ -159,7 +168,7 @@ class SileroVAD():
             vad_output = self.vad_iterator(torch.from_numpy(audio_float32))
             if vad_output is not None:
                 pass
-                print(f"VAD output: {vad_output}")
+                # print(f"VAD output: {vad_output}") # This can be noisy, commented out
             return vad_output
         except Exception as e:
             print(f"Error in VAD processing: {e}")
@@ -217,16 +226,26 @@ def read_wav_in_chunks(wav_file, chunk_size=1024):
 
 # The __main__ block is untouched
 if __name__ == "__main__":
-    vad = SileroVAD()
-    wav_file = sys.argv[1]
-    # asr = FunASR();
-    # start_time = time.time()
-    # asr.recognizer(wav_file)
-    # end_time = time.time()
-    # print(f"函数执行耗时: {end_time - start_time} 秒")
+    # Test ASR functionality
+    print("\n--- Running ASR Self-Test ---")
+    asr = FunASR()
+    # Use the absolute path inside the container for the test file
+    test_wav_file = "/app/audio/test.wav" 
+    start_time = time.time()
+    recognized_text = asr.recognizer(test_wav_file)
+    end_time = time.time()
+    print(f"Recognized Text: {recognized_text}")
+    print(f"ASR execution time: {end_time - start_time:.2f} seconds\n")
 
-    for i, chunk in enumerate(read_wav_in_chunks(wav_file)):
+
+    # Test VAD functionality
+    print("\n--- Running VAD Self-Test ---")
+    vad = SileroVAD()
+    # The user might pass a different file via command line for VAD
+    # If not, it falls back to the same test file
+    wav_file_for_vad = sys.argv[1] if len(sys.argv) > 1 else test_wav_file
+
+    for i, chunk in enumerate(read_wav_in_chunks(wav_file_for_vad)):
         print(i * 512, end=" ")
-        if len(chunk) == 1024:
+        if len(chunk) > 0:
             print(vad.is_vad(chunk))
-            
