@@ -130,19 +130,20 @@ void EdgeRender::startRender() {
       cv::cvtColor(mat, rgba, cv::COLOR_BGR2RGBA);
       //_frames.push(rgba);
 
-      json metadata;
-      metadata["timestamp"] = getCurrentTime();
-      if (wav == "TTS_DONE") {
-        metadata["listen"] = 1;
-      } else if (wav != "")
-        metadata["wav"] = "http://localhost:8080/" + wav;
-
-      std::string metadata_str =
-          metadata.dump(-1, ' ', false, json::error_handler_t::ignore);
-      if (wav != "") {
-        PLOGD << metadata_str;
-        wav = "";
-      }
+        json metadata;
+        metadata["timestamp"] = getCurrentTime();
+        if (wav == "TTS_DONE") {
+            metadata["listen"] = 1;
+        } else if (wav != "")
+            // ❌ BUG: This concatenates the full path, creating an invalid URL.
+            metadata["wav"] = "http://localhost:8080/" + wav; 
+        
+        std::string metadata_str =
+            metadata.dump(-1, ' ', false, json::error_handler_t::ignore);
+        if (wav != "") {
+            PLOGD << metadata_str; // This line prints the bad URL to your logs
+            wav = "";
+        }
       uint32_t metadata_length = static_cast<uint32_t>(metadata_str.size());
 
       // 创建消息缓冲区
