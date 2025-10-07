@@ -168,7 +168,7 @@ std::string tts(const std::string &text, const std::string &voice) {
   std::string wavPath = createSafeFilename(text);
 	
   
-  if (std::filesystem::exists(wav)) {
+  if (std::filesystem::exists(wavPath)) {
     return wavPath;
   }
 
@@ -185,7 +185,6 @@ std::string tts(const std::string &text, const std::string &voice) {
   curl = curl_easy_init();
 
   struct curl_slist *headers = NULL;
-  std::string wavPath = "";
 
   if (curl) {
 	 std::string url = "https://api.groq.com/openai/v1/audio/speech";
