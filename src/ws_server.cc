@@ -65,7 +65,33 @@ struct WorkFLow {
             PLOGE << "TTS failed to generate audio file for query: '" << query << "'";
             return; // Abort if TTS failed
         }
-        
+
+          // --- FIX: Add FFmpeg audio conversion for the lip-sync engine ---
+
+          // A. Define a new path for the 16kHz mono file.
+          std::string converted_audio_path = audio_filepath;
+          size_t pos = converted_audio_path.rfind(".wav");
+          if (pos != std::string::npos) {
+              converted_audio_path.insert(pos, "_16k_mono");
+          }
+
+          // B. Create and execute the FFmpeg command.
+          std::string ffmpeg_command = "ffmpeg -y -i " + audio_filepath + 
+                                       " -ar 16000 -ac 1 -c:a pcm_s16le " + converted_audio_path;
+          
+          PLOGI << "Running FFmpeg conversion: " << ffmpeg_command;
+          int conversion_result = std::system(ffmpeg_command.c_str());
+
+          // C. Check if the conversion was successful.
+          if (conversion_result != 0 || !std::filesystem::exists(converted_audio_path)) {
+              PLOGE << "FFmpeg audio conversion failed for: " << audio_filepath;
+              return; // Abort if conversion fails
+          }
+
+          // --- END FIX ---
+      
+
+      
         // 3a. Push the valid file path to the renderer for lip-sync.
         // We use a promise to create a "ready" future that the queue expects.
         std::promise<std::string> promise;
