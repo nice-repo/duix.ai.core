@@ -15,14 +15,6 @@
 #include <websocketpp/server.hpp>
 using json = nlohmann::json;
 
-std::string getBaseName(const std::string& path) {
-    size_t pos = path.find_last_of("/\\");
-    if (pos != std::string::npos) {
-        return path.substr(pos + 1);
-    }
-    return path;
-}
-
 typedef websocketpp::server<websocketpp::config::asio> server;
 using websocketpp::connection_hdl;
 using websocketpp::lib::bind;
