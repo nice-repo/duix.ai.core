@@ -95,7 +95,7 @@ struct WorkFLow {
         // 3a. Push the valid file path to the renderer for lip-sync.
         // We use a promise to create a "ready" future that the queue expects.
         std::promise<std::string> promise;
-        promise.set_value(audio_filepath);
+        promise.set_value(converted_audio_path);  // Use the new, converted path
         std::future<std::string> fut_for_renderer = promise.get_future();
         _render->_ttsTasks.push(fut_for_renderer);
         
