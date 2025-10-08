@@ -136,7 +136,7 @@ void EdgeRender::startRender() {
             metadata["listen"] = 1;
         } else if (wav != "")
             // ❌ BUG: This concatenates the full path, creating an invalid URL.
-            metadata["wav"] = "http://localhost:8080" + wav; 
+            metadata["wav"] = "http://localhost:6002" + wav; 
         
         std::string metadata_str =
             metadata.dump(-1, ' ', false, json::error_handler_t::ignore);
