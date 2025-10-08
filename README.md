@@ -53,7 +53,7 @@ docker build -t duix-ai .
 # Run the container (example)
 docker run -d \
   -p 6001-6003:6001-6003 \
-  -p 38080:8080 \
+  -p 8080:8080 \
   -e GROQ_API_KEY=your_groq_api_key \
   -e LM_API_KEY=your_lm_api_key \
   duix-ai
