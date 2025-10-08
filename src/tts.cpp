@@ -9,6 +9,7 @@
 
 #include "audio.h"
 #include "config.h"
+#include "clog.h"
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -212,17 +213,26 @@ std::string tts(const std::string &text, const std::string &voice) {
     res = curl_easy_perform(curl);
 
     // 检查错误
-    if (res != CURLE_OK) {
-            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-            wavPath = ""; // Clear path on failure
+		if (res != CURLE_OK) {
+            PLOGE << "curl_easy_perform() failed: " << curl_easy_strerror(res);
+            wavPath = ""; // Clear path on network failure
         } else {
-            std::ofstream wavFile(wavPath, std::ios::binary);
-            if (wavFile.is_open()) {
-                wavFile.write(chunk.memory, chunk.size);
-                wavFile.close();
+            // Check if the response is a JSON error or audio data.
+            // JSON errors will start with a '{'.
+            if (chunk.size > 0 && chunk.memory[0] == '{') {
+                PLOGE << "Groq API returned a JSON error: " << chunk.memory;
+                wavPath = ""; // Clear path on API error
             } else {
-                fprintf(stderr, "Error: Could not open file for writing: %s\n", wavPath.c_str());
-                wavPath = ""; // Clear path on failure
+                // Success! The response seems to be audio data.
+                std::ofstream wavFile(wavPath, std::ios::binary);
+                if (wavFile.is_open()) {
+                    wavFile.write(chunk.memory, chunk.size);
+                    wavFile.close();
+                    PLOGI << "Successfully saved TTS audio to " << wavPath;
+                } else {
+                    PLOGE << "Failed to open file for writing: " << wavPath;
+                    wavPath = ""; // Clear path on file system error
+                }
             }
         }
 
