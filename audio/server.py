@@ -6,7 +6,10 @@ from silvad import SileroVAD
 from funasr import AutoModel
 
 # --- Configuration ---
-ASR_MODEL = "iic/SenseVoiceSmall"
+# --- FIX: Use the correct Hugging Face model ID for SenseVoiceSmall ---
+ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
+
+# The server will listen on this host and port.
 HOST = "0.0.0.0"
 PORT = 6002
 VAD_FRAME_SIZE = 512
@@ -15,6 +18,7 @@ VAD_FRAME_SIZE = 512
 try:
     print("--- Initializing VAD and ASR models ---")
     VAD = SileroVAD()
+    # This now correctly uses the Hugging Face model on the CPU
     ASR = AutoModel(model=ASR_MODEL, hub="hf", device="cpu")
     print("--- Models initialized successfully ---")
 except Exception as e:
@@ -22,7 +26,7 @@ except Exception as e:
     exit(1)
 
 
-# --- FIX: Removed the unused 'path' argument from the function definition ---
+# Corrected function signature
 async def handle_client(websocket):
     """
     This function is called for each new client that connects to the WebSocket server.
@@ -55,6 +59,7 @@ async def handle_client(websocket):
                     if vad_result and 'start' in vad_result and not is_speaking:
                         print("Speech start detected.")
                         is_speaking = True
+                        # Include the chunk that triggered the start
                         speech_buffer = np.concatenate((speech_buffer, vad_chunk))
                     
                     if vad_result and 'end' in vad_result and is_speaking:
