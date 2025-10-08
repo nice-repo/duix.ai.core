@@ -4,8 +4,7 @@ import json
 import wave
 import os
 import numpy as np
-from silvad import SileroVAD
-from funasr import FunASR
+from silvad import FunASR, SileroVAD 
 
 # --- Configuration ---
 # This is a larger, more accurate English model from the FunASR Model Zoo.
