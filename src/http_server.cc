@@ -78,7 +78,7 @@ int main() {
         auto root = json::parse(req.body);
         std::string text = root.value("text", "请问有什么可以帮你的吗");
         std::string role = root.value("role", "siyao");
-        std::string voice = root.value("voice", "male-qn-qingse");
+        std::string voice = root.value("voice", "Aaliyah-PlayAI");
 
         std::string baseDir = "gj_dh_res";
         auto wav = tts::tts(text, voice);
