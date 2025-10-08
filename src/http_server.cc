@@ -14,22 +14,39 @@
 #include <getopt.hpp>
 #include <memory>
 #include <string>
+#include <cstdlib> // Required for std::getenv
+
 using namespace std;
 using json = nlohmann::json;
 
 int main() {
-  curl_global_init(CURL_GLOBAL_DEFAULT);
-  auto *config = config::get();
-  std::string conf = getarg("conf/conf.json", "-c", "--conf");
-  std::ifstream stream(conf);
-  if (stream.is_open()) {
-    auto root = json::parse(stream);
-    if (root.count("groq")) {
-      config->groupId = root["groq"].value("groupId", "");
-      config->apiKey = root["groq"].value("apiKey", "");
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    auto *config = config::get();
+    
+    // 1. Read the API key from the environment variable first.
+    const char* groq_api_key_env = std::getenv("GROQ_API_KEY");
+    if (groq_api_key_env != nullptr) {
+        config->apiKey = groq_api_key_env;
+        PLOGI << "Loaded Groq API Key from environment variable.";
+    } else {
+        PLOGI << "GROQ_API_KEY environment variable not set. Checking conf.json...";
+        // 2. Fall back to reading from the JSON file if the environment variable is not set.
+        std::string conf = getarg("conf/conf.json", "-c", "--conf");
+        std::ifstream stream(conf);
+        if (stream.is_open()) {
+            auto root = json::parse(stream);
+            if (root.count("groq")) {
+                config->apiKey = root["groq"].value("apiKey", "");
+            }
+        }
     }
-  }
 
+  // This check is now more effective.
+  if (config->apiKey.empty()) {
+      PLOGE << "Groq API Key is not set. Please set GROQ_API_KEY environment variable or add it to conf.json.";
+      return 0;
+  }
+    
   if (config->valid() == false) {
     PLOGE << "config invalid:" << conf;
     return 0;
