@@ -119,6 +119,13 @@ void EdgeRender::startRender() {
                     Timer t("feat extreact: " + wav);
                     buf_index = 0;
                     all_buf = _digit->newwav(wav.c_str(), "");
+
+                    // --- ADD DEBUG LOGGING HERE ---
+                    PLOGI << "Lip-sync engine processed: " << wav << ". Resulting buffer size (all_buf): " << all_buf;
+                    if (all_buf <= 0) {
+                        PLOGE << "Lip-sync feature extraction FAILED or produced no data. Lips will not move.";
+                    }
+                    // --- END DEBUG LOGGING ---
                 }
                 continue;
             } else {
