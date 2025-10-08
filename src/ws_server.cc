@@ -11,6 +11,7 @@
 #include <iostream>
 #include <map>
 #include <vector>
+#include <cstdlib> // for std::getenv ---
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
 using json = nlohmann::json;
@@ -190,6 +191,28 @@ int main() {
       config->lmPrompt = root["lmPrompt"];
     }
   }
+
+  // --- FIX STARTS HERE ---
+    // Step 2: Override API keys with environment variables if they exist.
+    
+    const char* groq_key_env = std::getenv("GROQ_API_KEY");
+    if (groq_key_env != nullptr && std::string(groq_key_env).length() > 0) {
+        config->apiKey = groq_key_env;
+        PLOGI << "Loaded Groq API Key from environment variable.";
+    }
+
+    const char* lm_key_env = std::getenv("LM_API_KEY");
+    if (lm_key_env != nullptr && std::string(lm_key_env).length() > 0) {
+        config->lmApiKey = lm_key_env;
+        PLOGI << "Loaded LM API Key from environment variable.";
+    }
+    // --- FIX ENDS HERE ---
+
+    // Step 3: Validate the final configuration.
+    if (config->apiKey.empty() || config->lmApiKey.empty()) {
+        PLOGE << "API Key is missing. Set GROQ_API_KEY/LM_API_KEY environment variables or add them to " << conf;
+        return 0;
+    }
 
   if (config->valid() == false) {
     PLOGE << "config invalid:" << conf;
