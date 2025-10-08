@@ -6,38 +6,31 @@ from silvad import SileroVAD
 from funasr import AutoModel
 
 # --- Configuration ---
-# --- FIX 1: Use the correct Hugging Face model ID for SenseVoiceSmall ---
-ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
-
-# The server will listen on this host and port.
+ASR_MODEL = "iic/SenseVoiceSmall"
 HOST = "0.0.0.0"
 PORT = 6002
-
-# Voice Activity Detection (VAD) settings
-VAD_FRAME_SIZE = 512   # Process audio in chunks of 512 samples
+VAD_FRAME_SIZE = 512
 
 # Create instances of the VAD and ASR models
 try:
     print("--- Initializing VAD and ASR models ---")
     VAD = SileroVAD()
-    
-    # --- FIX 2: Add hub='hf' to download from Hugging Face and device='cpu' for CPU-only usage ---
     ASR = AutoModel(model=ASR_MODEL, hub="hf", device="cpu")
-    
     print("--- Models initialized successfully ---")
 except Exception as e:
     print(f"Error initializing models: {e}")
     exit(1)
 
 
-async def handle_client(websocket, path):
+# --- FIX: Removed the unused 'path' argument from the function definition ---
+async def handle_client(websocket):
     """
     This function is called for each new client that connects to the WebSocket server.
     """
     print(f"Client connected from {websocket.remote_address}")
 
     audio_buffer = np.array([], dtype=np.int16)
-    speech_buffer = np.array([], dtype=np.int16) # Buffer to hold audio between VAD start and end
+    speech_buffer = np.array([], dtype=np.int16)
     is_speaking = False
     
     try:
@@ -68,7 +61,6 @@ async def handle_client(websocket, path):
                         print("Speech end detected. Transcribing...")
                         is_speaking = False
                         
-                        # The .generate() method is correct for AutoModel
                         results = ASR.generate(input=speech_buffer)
                         transcribed_text = ""
                         if results and len(results) > 0 and "text" in results[0]:
