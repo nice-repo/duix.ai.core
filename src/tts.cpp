@@ -174,6 +174,21 @@ std::string tts(const std::string &text, const std::string &voice) {
   }
 
   auto *config = config::get();
+
+    // --- DEBUG CODE TO PRINT LAST 4 DIGITS OF API KEY ---
+	if (config && !config->apiKey.empty()) {
+		if (config->apiKey.length() > 4) {
+			std::string last_four = config->apiKey.substr(config->apiKey.length() - 4);
+			PLOGI << "Using Groq API Key ending in: ... " << last_four;
+		} else {
+			PLOGI << "Groq API Key is too short to display partial key.";
+		}
+	} else {
+		PLOGE << "Groq API Key not found in configuration!";
+	}
+	// --- END DEBUG CODE ---
+
+	
   CURL *curl;
   CURLcode res;
   struct MemoryStruct chunk;
