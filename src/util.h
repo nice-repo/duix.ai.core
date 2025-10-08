@@ -9,6 +9,18 @@
 #include <iostream>
 #include "clog.h"
 
+// --- ADD THIS FUNCTION ---
+// This function extracts the filename from a full path (e.g., "/app/audio/file.wav" -> "file.wav")
+// It needs to be 'inline' because it is defined in a header file.
+inline std::string getBaseName(const std::string& path) {
+    size_t pos = path.find_last_of("/\\");
+    if (pos != std::string::npos) {
+        return path.substr(pos + 1);
+    }
+    return path;
+}
+// --- END OF ADDITION ---
+
 std::u32string utf8ToUtf32(const std::string &utf8_str);
 std::string utf32ToUtf8(const std::u32string &utf32_str);
 std::vector<std::string> splitMixedSentences(std::string &text, bool last);
