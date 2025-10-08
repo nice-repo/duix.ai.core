@@ -52,119 +52,116 @@ void EdgeRender::setImgHdl(ImgHdl hdl) { _imgHdl = hdl; }
 void EdgeRender::setMsgHdl(MsgHdl hdl) { _msgHdl = hdl; }
 
 void EdgeRender::startRender() {
-  _thSender = std::thread([this] {
-    const std::chrono::milliseconds frameDuration(40); // 25fps
-    while (done() == false) {
-      auto frameStart = std::chrono::steady_clock::now();
-      std::shared_ptr<std::vector<uint8_t>> rgba;
-      bool ret = _frames.try_pop(rgba);
-      if (ret) {
-        _imgHdl(*rgba);
-      } else {
-        PLOGE << "lack of frame";
-      }
-      // 控制帧率
-      auto frameEnd = std::chrono::steady_clock::now();
-      auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-          frameEnd - frameStart);
-      if (elapsed < frameDuration) {
-        std::this_thread::sleep_for(frameDuration - elapsed);
-      }
-    }
-  });
-
-  _thWav = std::thread([this] {
-    std::future<std::string> fut;
-    std::string wav;
-    while (done() == false) {
-      if (_ttsTasks.try_pop(fut) == true) {
-        wav = fut.get();
-        std::string bk = wav;
-        _wavs.push(wav);
-        PLOGD << "Push wav: " << bk;
-      }
-    }
-  });
-
-  _thRender = std::thread([this] {
-    int i = 0;
-    int all_buf = 0;
-    int buf_index = 0;
-    std::string wav = "";
-    std::string text = "";
-
-    while (done() == false) {
-      cv::Mat mat = cv::Mat(_modelInfo._height, _modelInfo._width, CV_8UC3);
-      cv::Mat mskmat = cv::Mat(_modelInfo._height, _modelInfo._width, CV_8UC3);
-      Frame frame = _modelInfo._frames[i++ % _modelInfo._frames.size()];
-
-      if (buf_index < all_buf) {
-        if (_modelInfo._hasMask) {
-          _digit->mskrstbuf(buf_index++, frame._rawPath.c_str(), frame.rect,
-                            frame._maskPath.c_str(), frame._sgPath.c_str(),
-                            reinterpret_cast<char *>(mat.data),
-                            reinterpret_cast<char *>(mskmat.data),
-                            _modelInfo._width * _modelInfo._height * 3);
-
-        } else {
-          _digit->onerstbuf(buf_index++, frame._rawPath.c_str(), frame.rect,
-                            reinterpret_cast<char *>(mat.data),
-                            _modelInfo._height * _modelInfo._width * 3);
+    _thSender = std::thread([this] {
+        const std::chrono::milliseconds frameDuration(40); // 25fps
+        while (done() == false) {
+            auto frameStart = std::chrono::steady_clock::now();
+            std::shared_ptr<std::vector<uint8_t>> rgba;
+            bool ret = _frames.try_pop(rgba);
+            if (ret) {
+                _imgHdl(*rgba);
+            } else {
+                // This error is normal when the avatar is idle.
+                // PLOGE << "lack of frame"; 
+            }
+            auto frameEnd = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - frameStart);
+            if (elapsed < frameDuration) {
+                std::this_thread::sleep_for(frameDuration - elapsed);
+            }
         }
-      } else if (_wavs.try_pop(wav) == true) {
-        if (wav.size() > 0 and wav != "TTS_DONE") {
-          Timer t("feat extreact: " + wav);
-          buf_index = 0;
-          all_buf = _digit->newwav(wav.c_str(), "");
+    });
+
+    _thWav = std::thread([this] {
+        std::future<std::string> fut;
+        std::string wav;
+        while (done() == false) {
+            if (_ttsTasks.try_pop(fut) == true) {
+                wav = fut.get();
+                _wavs.push(wav);
+                PLOGD << "Push wav: " << wav;
+            }
         }
-        continue;
-      } else {
-        buf_index = 0;
-        all_buf = 0;
-        _digit->drawonebuf(frame._rawPath.c_str(),
-                           reinterpret_cast<char *>(mat.data),
-                           _modelInfo._height * _modelInfo._width * 3);
-      }
+    });
 
-      cv::Mat rgba;
-      cv::cvtColor(mat, rgba, cv::COLOR_BGR2RGBA);
-      //_frames.push(rgba);
+    _thRender = std::thread([this] {
+        int i = 0;
+        int all_buf = 0;
+        int buf_index = 0;
+        std::string wav = "";
 
-        json metadata;
-        metadata["timestamp"] = getCurrentTime();
-        if (wav == "TTS_DONE") {
-            metadata["listen"] = 1;
-        } else if (wav != "")
-            // ❌ BUG: This concatenates the full path, creating an invalid URL.
-            metadata["wav"] = "http://localhost:6002" + wav; 
-        
-        std::string metadata_str =
-            metadata.dump(-1, ' ', false, json::error_handler_t::ignore);
-        if (wav != "") {
-            PLOGD << metadata_str; // This line prints the bad URL to your logs
-            wav = "";
+        while (done() == false) {
+            cv::Mat mat = cv::Mat(_modelInfo._height, _modelInfo._width, CV_8UC3);
+            cv::Mat mskmat = cv::Mat(_modelInfo._height, _modelInfo._width, CV_8UC3);
+            
+            // Prevent crash if _modelInfo._frames is empty
+            if (_modelInfo._frames.empty()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
+            Frame frame = _modelInfo._frames[i++ % _modelInfo._frames.size()];
+
+            if (buf_index < all_buf) {
+                if (_modelInfo._hasMask) {
+                    _digit->mskrstbuf(buf_index++, frame._rawPath.c_str(), frame.rect,
+                                      frame._maskPath.c_str(), frame._sgPath.c_str(),
+                                      reinterpret_cast<char *>(mat.data),
+                                      reinterpret_cast<char *>(mskmat.data),
+                                      _modelInfo._width * _modelInfo._height * 3);
+
+                } else {
+                    _digit->onerstbuf(buf_index++, frame._rawPath.c_str(), frame.rect,
+                                      reinterpret_cast<char *>(mat.data),
+                                      _modelInfo._height * _modelInfo._width * 3);
+                }
+            } else if (_wavs.try_pop(wav) == true) {
+                if (wav.size() > 0 && wav != "TTS_DONE") {
+                    Timer t("feat extreact: " + wav);
+                    buf_index = 0;
+                    all_buf = _digit->newwav(wav.c_str(), "");
+                }
+                continue;
+            } else {
+                buf_index = 0;
+                all_buf = 0;
+                _digit->drawonebuf(frame._rawPath.c_str(),
+                                   reinterpret_cast<char *>(mat.data),
+                                   _modelInfo._height * _modelInfo._width * 3);
+            }
+
+            cv::Mat rgba;
+            cv::cvtColor(mat, rgba, cv::COLOR_BGR2RGBA);
+
+            json metadata;
+            metadata["timestamp"] = getCurrentTime();
+            if (wav == "TTS_DONE") {
+                metadata["listen"] = 1;
+            } else if (!wav.empty()) {
+                // ✅ FIX: Use the correct port (8080) and only the filename.
+                metadata["wav"] = "http://localhost:8080/audio/" + getBaseName(wav);
+            }
+            
+            std::string metadata_str = metadata.dump();
+            
+            if (!wav.empty()) {
+                PLOGD << "Generated Metadata: " << metadata_str; // Log the corrected JSON
+                wav = "";
+            }
+            
+            uint32_t metadata_length = static_cast<uint32_t>(metadata_str.size());
+            auto message_buffer = std::make_shared<std::vector<uint8_t>>();
+            uint32_t net_length = htonl(metadata_length);
+            
+            message_buffer->insert(message_buffer->end(),
+                                   reinterpret_cast<uint8_t *>(&net_length),
+                                   reinterpret_cast<uint8_t *>(&net_length) + 4);
+            message_buffer->insert(message_buffer->end(), metadata_str.begin(), metadata_str.end());
+            message_buffer->insert(message_buffer->end(), rgba.data, rgba.data + (rgba.rows * rgba.cols * rgba.channels()));
+            _frames.push(message_buffer);
         }
-      uint32_t metadata_length = static_cast<uint32_t>(metadata_str.size());
-
-      // 创建消息缓冲区
-      auto message_buffer = std::make_shared<std::vector<uint8_t>>();
-
-      // 添加JSON长度(4字节网络字节序)
-      uint32_t net_length = htonl(metadata_length);
-      message_buffer->insert(message_buffer->end(),
-                             reinterpret_cast<uint8_t *>(&net_length),
-                             reinterpret_cast<uint8_t *>(&net_length) + 4);
-
-      // 添加JSON元数据
-      message_buffer->insert(message_buffer->end(), metadata_str.begin(),
-                             metadata_str.end());
-      message_buffer->insert(message_buffer->end(), rgba.data,
-                             rgba.data +
-                                 rgba.rows * rgba.cols * rgba.channels());
-      _frames.push(message_buffer);
-    }
-  });
+    });
 }
+
 
 int EdgeRender::checkModel(const std::string &role) {
   static std::mutex mx;
