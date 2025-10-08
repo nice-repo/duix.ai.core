@@ -58,7 +58,7 @@ struct WorkFLow {
     // Launch a single background thread to handle the entire TTS process.
     std::thread([this, query]() {
         // 1. Call TTS ONCE to generate the audio file.
-        std::string audio_filepath = tts::tts(query, "tianxin_xiaoling");
+        std::string audio_filepath = tts::tts(query, "Aaliyah-PlayAI");
 
         // 2. Check if the audio file was created successfully.
         if (audio_filepath.empty()) {
