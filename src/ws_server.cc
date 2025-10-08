@@ -44,55 +44,48 @@ struct WorkFLow {
     _render->load(role);
     _render->startRender();
 
-    _lmClient = std::make_shared<LmClient>();
-
-    _lmClient->onSubText = [this](const std::vector<std::string> &array) {
-        for (auto &msg : array) {
-            PLOGD << "TTS input: " << msg;
-
-            if (msg.empty()) {
-                continue;
-            }
-
-            auto fut = std::async(std::launch::async, tts::tts, msg, "tianxin_xiaoling");
-
-            std::thread([this](std::future<std::string> tts_future) {
-                std::string audio_filepath = tts_future.get();
-                if (!audio_filepath.empty() && audio_filepath != "TTS_DONE") {
-                    
-                    // --- FIX STARTS HERE ---
-                    // 1. Get just the filename (e.g., "Yeah.wav") from the full path (/app/audio/Yeah.wav).
-                    std::string audio_filename = getBaseName(audio_filepath);
-
-                    // 2. Construct the correct URL. The HTTP server maps the web path "/audio"
-                    //    to the file system path "/app/audio".
-                    std::string audio_url = "http://localhost:8080/audio/" + audio_filename;
-                    // --- FIX ENDS HERE ---
-
-                    json response_json;
-                    response_json["wav"] = audio_url;
-                    std::string response_message = response_json.dump();
-                    
-                    if (_sendText) {
-                        PLOGI << "Sending audio URL back to client: " << response_message;
-                        _sendText(response_message);
-                    }
-                }
-            }, std::move(fut)).detach();
-
-            auto fut_for_renderer = std::async(std::launch::async, tts::tts, msg, "tianxin_xiaoling");
-            _render->_ttsTasks.push(fut_for_renderer);
-        }
-    };
     return 0;
   }
   
   void chat(const std::string &query) {
-    if (_render && !query.empty()) {
-        PLOGI << "Forwarding query to TTS engine: " << query;
-        auto fut_for_renderer = std::async(std::launch::async, tts::tts, query, "tianxin_xiaoling");
-        _render->_ttsTasks.push(fut_for_renderer);
+    if (!_render || query.empty()) {
+        return;
     }
+
+    PLOGI << "Processing query for TTS and lip-sync: " << query;
+
+    // Launch a single background thread to handle the entire TTS process.
+    std::thread([this, query]() {
+        // 1. Call TTS ONCE to generate the audio file.
+        std::string audio_filepath = tts::tts(query, "tianxin_xiaoling");
+
+        // 2. Check if the audio file was created successfully.
+        if (audio_filepath.empty()) {
+            PLOGE << "TTS failed to generate audio file for query: '" << query << "'";
+            return; // Abort if TTS failed
+        }
+        
+        // 3a. Push the valid file path to the renderer for lip-sync.
+        // We use a promise to create a "ready" future that the queue expects.
+        std::promise<std::string> promise;
+        promise.set_value(audio_filepath);
+        std::future<std::string> fut_for_renderer = promise.get_future();
+        _render->_ttsTasks.push(fut_for_renderer);
+        
+        // 3b. Construct the public URL and send it to the client for playback.
+        if (_sendText) {
+            std::string audio_filename = getBaseName(audio_filepath);
+            std::string audio_url = "http://localhost:8080/audio/" + audio_filename;
+            
+            json response_json;
+            response_json["wav"] = audio_url;
+            std::string response_message = response_json.dump();
+            
+            PLOGI << "Sending audio URL to client: " << response_message;
+            _sendText(response_message);
+        }
+
+    }).detach(); // Detach the thread to let it run in the background.
   }
 };
 
