@@ -22,6 +22,8 @@ using json = nlohmann::json;
 int main() {
     curl_global_init(CURL_GLOBAL_DEFAULT);
     auto *config = config::get();
+
+    std::string conf = getarg("conf/conf.json", "-c", "--conf");
     
     // 1. Read the API key from the environment variable first.
     const char* groq_api_key_env = std::getenv("GROQ_API_KEY");
