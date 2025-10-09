@@ -75,7 +75,9 @@ async def handle_client(websocket):
                             raw_text_with_tags = results[0]["text"]
                             transcribed_text = rich_transcription_postprocess(raw_text_with_tags)
                         
+                        # --- Clear all buffers to prevent re-transcription ---
                         speech_buffer = np.array([], dtype=np.int16)
+                        audio_buffer = np.array([], dtype=np.int16)
                         
                         if transcribed_text:
                             print(f"Clean Transcription: '{transcribed_text}'")
