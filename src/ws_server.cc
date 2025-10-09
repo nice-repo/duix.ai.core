@@ -273,6 +273,10 @@ int main() {
     metadata["timestamp"] = getCurrentTime();
     metadata["role"].push_back("SiYao");
     metadata["role"].push_back("DearSister");
+    
+    metadata["listen"] = 1;
+    PLOGI << "Sending initial roles and listen signal: " << metadata.dump();
+    
     std::string metadata_str =
         metadata.dump(-1, ' ', false, json::error_handler_t::ignore);
     uint32_t metadata_length = static_cast<uint32_t>(metadata_str.size());
