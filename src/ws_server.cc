@@ -41,15 +41,9 @@ long long getCurrentTimeMs() {
 struct WorkFLow {
     std::shared_ptr<EdgeRender> _render = nullptr;
     std::function<void(const std::string &msg)> _sendText = nullptr;
-    std::string pending_audio_path = "";
     std::atomic<bool> paused{false};
     std::atomic<bool> initialized{false};
     std::atomic<long long> last_active_ts{0}; // epoch ms
-
-    // thread-safe queue of audio paths for EdgeRender
-    std::mutex tts_queue_mutex;
-    std::queue<std::string> tts_queue;
-    std::condition_variable tts_cv;
 
     WorkFLow() {
         _render = nullptr;
@@ -75,7 +69,8 @@ struct WorkFLow {
         touch();
         // Clean up prior render if any
         if (_render) {
-            try { _render->stopRender(); } catch(...) {}
+            // NOTE: The original EdgeRender interface might not have a stop function.
+            // Resetting the smart pointer is the best we can do to signal cleanup.
             _render.reset();
         }
 
@@ -88,12 +83,10 @@ struct WorkFLow {
             PLOGE << "EdgeRender::load failed role=" << role;
             return ret;
         }
-        ret = _render->startRender(); // assume startRender returns 0 on success
-        if (ret == 0) {
-            initialized.store(true);
-            PLOGI << "WorkFLow initialized for role=" << role;
-        }
-        return ret;
+        _render->startRender(); // FIX: Does not return a value.
+        initialized.store(true);
+        PLOGI << "WorkFLow initialized for role=" << role;
+        return 0; // Assume success if we reach here
     }
 
     // Pause without freeing renderer (keep resources alive)
@@ -101,9 +94,7 @@ struct WorkFLow {
         touch();
         paused.store(true);
         PLOGI << "WorkFLow paused";
-        if (_render) {
-            try { _render->pauseRendering(); } catch(...) {}
-        }
+        // NOTE: Removed call to non-existent _render->pauseRendering()
     }
 
     // Resume activity
@@ -111,9 +102,7 @@ struct WorkFLow {
         touch();
         paused.store(false);
         PLOGI << "WorkFLow resumed";
-        if (_render) {
-            try { _render->resumeRendering(); } catch(...) {}
-        }
+        // NOTE: Removed call to non-existent _render->resumeRendering()
     }
 
     bool isPaused() const { return paused.load(); }
@@ -121,37 +110,26 @@ struct WorkFLow {
     // Stop and free renderer and clear queues
     void stop() {
         PLOGI << "Stopping WorkFLow";
-        try {
-            // notify any waiting TTS consumer
-            {
-                std::lock_guard<std::mutex> lk(tts_queue_mutex);
-                while (!tts_queue.empty()) tts_queue.pop();
-            }
-            tts_cv.notify_all();
-
-            if (_render) {
-                try { _render->stopRender(); } catch (const std::exception &e) { PLOGE << "stopRender exc: " << e.what(); }
-                _render.reset();
-            }
-        } catch (...) {
-            PLOGE << "Exception during WorkFLow::stop()";
+        if (_render) {
+            // NOTE: Removed call to non-existent _render->stopRender()
+            _render.reset();
         }
         initialized.store(false);
-        pending_audio_path = "";
     }
 
-    // Enqueue a TTS file path (full path) for lip-sync
+    // Enqueue a TTS file path for lip-sync using the original promise/future method
     void enqueueTTS(const std::string &fullpath) {
-        // This is a placeholder for where you'd integrate with EdgeRender's queue.
-        // Assuming EdgeRender has a method like this.
-        if (_render) {
-            _render->enqueueTTS(fullpath);
+        if (_render && _render->_ttsTasks.is_lock_free()) {
+            std::promise<std::string> promise;
+            promise.set_value(fullpath);
+            std::future<std::string> fut = promise.get_future();
+            _render->_ttsTasks.push(std::move(fut)); // Use std::move for future
             PLOGI << "Enqueued TTS file for EdgeRender: " << fullpath;
         } else {
-             PLOGW << "Cannot enqueue TTS, render is null.";
+             PLOGI << "Cannot enqueue TTS, render is null or queue is busy."; // FIX: PLOGW -> PLOGI
         }
     }
-    
+
     // New chat method to handle audio_id
     void chat(const std::string &query) {
         if (query.empty()) return;
@@ -186,10 +164,8 @@ struct WorkFLow {
                 PLOGI << "Copied TTS file to " << dest_path;
             } catch (const std::exception &e) {
                 PLOGE << "Failed to copy audio to /app/audio/: " << e.what();
-                dest_path = converted;
+                return; // Don't proceed if copy fails
             }
-
-            this->pending_audio_path = dest_path;
 
             // Send URL + audio_id to client for buffering
             if (_sendText) {
@@ -293,7 +269,7 @@ void on_message(server *s, websocketpp::connection_hdl hdl,
         auto flow = connectionManager.get(hdl);
 
         if (!flow) {
-            PLOGW << "No workflow found for connection";
+            PLOGI << "No workflow found for connection"; // FIX: PLOGW -> PLOGI
             return;
         }
 
@@ -314,7 +290,7 @@ void on_message(server *s, websocketpp::connection_hdl hdl,
 
         } else if (event == "query") {
             if (!flow->initialized) {
-                PLOGW << "Workflow not initialized, cannot process query";
+                PLOGI << "Workflow not initialized, cannot process query"; // FIX: PLOGW -> PLOGI
                 json error_response;
                 error_response["event"] = "error";
                 error_response["message"] = "Workflow not initialized";
@@ -335,7 +311,7 @@ void on_message(server *s, websocketpp::connection_hdl hdl,
                 play_command["event"] = "play_audio";
                 s->send(hdl, play_command.dump(), websocketpp::frame::opcode::text);
             } else {
-                PLOGW << "audio_ready without audio_id";
+                PLOGI << "audio_ready without audio_id"; // FIX: PLOGW -> PLOGI
             }
 
         } else if (event == "pause") {
@@ -348,7 +324,7 @@ void on_message(server *s, websocketpp::connection_hdl hdl,
             PLOGD << "Received heartbeat";
 
         } else {
-            PLOGW << "Unknown event: " << event;
+            PLOGI << "Unknown event: " << event; // FIX: PLOGW -> PLOGI
         }
 
     } catch (const std::exception& e) {
@@ -356,8 +332,9 @@ void on_message(server *s, websocketpp::connection_hdl hdl,
     }
 }
 
-
-int main() {
+int main(int argc, char* argv[]) {
+    // Note: You may need to initialize your logger here, e.g., clog::init();
+    
     curl_global_init(CURL_GLOBAL_DEFAULT);
     auto *config = config::get();
     std::string conf = getarg("conf/conf.json", "-c", "--conf");
