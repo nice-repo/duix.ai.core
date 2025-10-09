@@ -35,7 +35,7 @@ VAD_SENSITIVITY = 0.5
 try:
     print("--- Initializing VAD and ASR models ---")
     # Use the sensitivity parameter when creating the VAD model
-    VAD = SileroVAD(threshold=VAD_SENSITIVITY)
+    VAD = SileroVAD()
     ASR = AutoModel(model=ASR_MODEL, hub="hf", device="cpu")
     print("--- Models initialized successfully ---")
 except Exception as e:
