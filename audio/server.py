@@ -2,27 +2,40 @@ import asyncio
 import websockets
 import json
 import numpy as np
-from collections import deque # --- NEW: Import deque for efficient buffering ---
+from collections import deque
 from silvad import SileroVAD
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
-# --- Configuration ---
+# --- VAD & ASR Configuration ---
 ##ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
 ASR_MODEL = "/app/audio/SenseVoiceSmall"
 HOST = "0.0.0.0"
 PORT = 6002
 VAD_FRAME_SIZE = 512
 
-# Number of silent chunks required to trigger transcription (~0.5 seconds)
-SILENCE_THRESHOLD = 15 
-# Number of audio chunks to keep as padding before speech starts (~0.3 seconds)
-PADDING_CHUNKS = 10
+# --- NEW: Advanced Tuning Parameters ---
+# 1. How long to wait for silence after speech before transcribing (in chunks).
+#    A higher value is more patient for slower speakers. (25 chunks * 32ms/chunk = 800ms)
+SILENCE_THRESHOLD_CHUNKS = 25
+
+# 2. How much audio to keep before speech starts to provide context (in chunks).
+#    (16 chunks * 32ms/chunk = 512ms)
+PADDING_CHUNKS = 16
+
+# 3. The minimum number of audio samples required to be considered a valid recording.
+#    Helps ignore short noises. (4000 samples = 0.25 seconds at 16kHz)
+MIN_RECORDING_SAMPLES = 4000
+
+# 4. VAD model sensitivity. A lower value (e.g., 0.3) is less sensitive (requires louder speech).
+#    A higher value (e.g., 0.9) is more sensitive (picks up quieter speech).
+VAD_SENSITIVITY = 0.5 
 
 # --- Model Initialization ---
 try:
     print("--- Initializing VAD and ASR models ---")
-    VAD = SileroVAD()
+    # Use the sensitivity parameter when creating the VAD model
+    VAD = SileroVAD(threshold=VAD_SENSITIVITY)
     ASR = AutoModel(model=ASR_MODEL, hub="hf", device="cpu")
     print("--- Models initialized successfully ---")
 except Exception as e:
@@ -37,7 +50,6 @@ async def handle_client(websocket):
     speech_buffer = np.array([], dtype=np.int16)
     is_speaking = False
     silence_counter = 0
-    # --- NEW: A rolling buffer to store pre-speech audio padding ---
     padding_buffer = deque(maxlen=PADDING_CHUNKS)
     
     try:
@@ -54,9 +66,7 @@ async def handle_client(websocket):
                     vad_chunk = audio_buffer[:VAD_FRAME_SIZE]
                     audio_buffer = audio_buffer[VAD_FRAME_SIZE:]
 
-                    # --- MODIFIED: More robust VAD and buffering logic ---
                     if not is_speaking:
-                        # While not speaking, continuously update the padding buffer
                         padding_buffer.append(vad_chunk)
 
                     vad_result = VAD.is_vad(vad_chunk)
@@ -65,54 +75,53 @@ async def handle_client(websocket):
                         if not is_speaking:
                             print("Speech start detected.")
                             is_speaking = True
-                            # When speech starts, initialize the speech buffer with the padding
                             speech_buffer = np.concatenate(list(padding_buffer))
                         else:
-                            # Speech continues, add the current chunk
                             speech_buffer = np.concatenate((speech_buffer, vad_chunk))
                         silence_counter = 0
                     
                     elif is_speaking:
-                        # Append the current chunk to the speech buffer
                         speech_buffer = np.concatenate((speech_buffer, vad_chunk))
-                        
-                        # Check for silence
                         if not vad_result:
                             silence_counter += 1
                         else:
                             silence_counter = 0
 
-                        if silence_counter >= SILENCE_THRESHOLD:
+                        if silence_counter >= SILENCE_THRESHOLD_CHUNKS:
                             print(f"Sustained silence detected. Transcribing...")
                             
-                            speech_float32 = speech_buffer.astype(np.float32) / 32768.0
-                            
-                            loop = asyncio.get_running_loop()
-                            results = await loop.run_in_executor(
-                                None,
-                                lambda: ASR.generate(input=speech_float32, language="en")
-                            )
-                            
-                            transcribed_text = ""
-                            if results and len(results) > 0 and "text" in results[0]:
-                                raw_text_with_tags = results[0]["text"]
-                                transcribed_text = rich_transcription_postprocess(raw_text_with_tags)
-                            
+                            # --- NEW: Check for minimum recording length ---
+                            if len(speech_buffer) < MIN_RECORDING_SAMPLES:
+                                print(f"Recording too short ({len(speech_buffer)} samples), ignoring.")
+                            else:
+                                speech_float32 = speech_buffer.astype(np.float32) / 32768.0
+                                
+                                loop = asyncio.get_running_loop()
+                                results = await loop.run_in_executor(
+                                    None,
+                                    lambda: ASR.generate(input=speech_float32, language="en")
+                                )
+                                
+                                transcribed_text = ""
+                                if results and len(results) > 0 and "text" in results[0]:
+                                    raw_text_with_tags = results[0]["text"]
+                                    transcribed_text = rich_transcription_postprocess(raw_text_with_tags)
+                                
+                                if transcribed_text:
+                                    print(f"Clean Transcription: '{transcribed_text}'")
+                                    response = json.dumps({
+                                        'event': 'query',
+                                        'value': transcribed_text
+                                    }, ensure_ascii=False)
+                                    await websocket.send(response)
+                                else:
+                                    print("Transcription was empty.")
+
                             # Reset state for the next utterance
                             is_speaking = False
                             speech_buffer = np.array([], dtype=np.int16)
                             padding_buffer.clear()
                             silence_counter = 0
-                            
-                            if transcribed_text:
-                                print(f"Clean Transcription: '{transcribed_text}'")
-                                response = json.dumps({
-                                    'event': 'query',
-                                    'value': transcribed_text
-                                }, ensure_ascii=False)
-                                await websocket.send(response)
-                            else:
-                                print("Transcription was empty.")
 
             except Exception as e:
                 print(f"An error occurred while processing audio: {e}")
