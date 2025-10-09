@@ -4,16 +4,19 @@ import json
 import numpy as np
 from silvad import SileroVAD
 from funasr import AutoModel
-# --- FIX 1: Import the post-processing function ---
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
 # --- Configuration ---
 ##ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
-
 ASR_MODEL = "/app/audio/SenseVoiceSmall"
 HOST = "0.0.0.0"
 PORT = 6002
 VAD_FRAME_SIZE = 512
+
+# --- NEW: VAD Silence Threshold ---
+# Number of consecutive silent chunks required to trigger transcription.
+# 15 chunks * 32ms/chunk = ~480ms of silence.
+SILENCE_THRESHOLD = 15 
 
 # --- Model Initialization ---
 try:
@@ -32,6 +35,7 @@ async def handle_client(websocket):
     audio_buffer = np.array([], dtype=np.int16)
     speech_buffer = np.array([], dtype=np.int16)
     is_speaking = False
+    silence_counter = 0 # --- NEW: Counter for silent chunks ---
     
     try:
         async for message in websocket:
@@ -49,45 +53,53 @@ async def handle_client(websocket):
 
                     vad_result = VAD.is_vad(vad_chunk)
 
-                    if is_speaking:
+                    # --- MODIFIED: More robust VAD logic ---
+                    if vad_result and 'start' in vad_result:
+                        if not is_speaking:
+                            print("Speech start detected.")
+                            is_speaking = True
                         speech_buffer = np.concatenate((speech_buffer, vad_chunk))
-
-                    if vad_result and 'start' in vad_result and not is_speaking:
-                        print("Speech start detected.")
-                        is_speaking = True
-                        speech_buffer = np.concatenate((speech_buffer, vad_chunk))
+                        silence_counter = 0 # Reset silence counter on speech
                     
-                    if vad_result and 'end' in vad_result and is_speaking:
-                        print("Speech end detected. Transcribing...")
-                        is_speaking = False
-                        
-                        speech_float32 = speech_buffer.astype(np.float32) / 32768.0
-                        
-                        loop = asyncio.get_running_loop()
-                        results = await loop.run_in_executor(
-                            None,
-                            lambda: ASR.generate(input=speech_float32, language="en")
-                        )
-                        
-                        transcribed_text = ""
-                        if results and len(results) > 0 and "text" in results[0]:
-                            # --- FIX 2: Get the raw text and clean it using the post-process function ---
-                            raw_text_with_tags = results[0]["text"]
-                            transcribed_text = rich_transcription_postprocess(raw_text_with_tags)
-                        
-                        # --- Clear all buffers to prevent re-transcription ---
-                        speech_buffer = np.array([], dtype=np.int16)
-                        audio_buffer = np.array([], dtype=np.int16)
-                        
-                        if transcribed_text:
-                            print(f"Clean Transcription: '{transcribed_text}'")
-                            response = json.dumps({
-                                'event': 'query',
-                                'value': transcribed_text
-                            }, ensure_ascii=False)
-                            await websocket.send(response)
+                    elif is_speaking:
+                        speech_buffer = np.concatenate((speech_buffer, vad_chunk))
+                        # If no 'start' is detected, it's either continued speech or silence
+                        if not vad_result:
+                            silence_counter += 1
                         else:
-                            print("Transcription was empty.")
+                            silence_counter = 0 # Speech continues, reset counter
+
+                        if silence_counter >= SILENCE_THRESHOLD:
+                            print(f"Sustained silence ({silence_counter} chunks) detected. Transcribing...")
+                            
+                            speech_float32 = speech_buffer.astype(np.float32) / 32768.0
+                            
+                            loop = asyncio.get_running_loop()
+                            results = await loop.run_in_executor(
+                                None,
+                                lambda: ASR.generate(input=speech_float32, language="en")
+                            )
+                            
+                            transcribed_text = ""
+                            if results and len(results) > 0 and "text" in results[0]:
+                                raw_text_with_tags = results[0]["text"]
+                                transcribed_text = rich_transcription_postprocess(raw_text_with_tags)
+                            
+                            # Reset state for the next utterance
+                            is_speaking = False
+                            speech_buffer = np.array([], dtype=np.int16)
+                            audio_buffer = np.array([], dtype=np.int16) # Also clear main buffer
+                            silence_counter = 0
+                            
+                            if transcribed_text:
+                                print(f"Clean Transcription: '{transcribed_text}'")
+                                response = json.dumps({
+                                    'event': 'query',
+                                    'value': transcribed_text
+                                }, ensure_ascii=False)
+                                await websocket.send(response)
+                            else:
+                                print("Transcription was empty.")
 
             except Exception as e:
                 print(f"An error occurred while processing audio: {e}")
@@ -115,3 +127,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nServer is shutting down.")
+        
