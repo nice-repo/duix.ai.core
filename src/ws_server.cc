@@ -12,9 +12,17 @@
 #include <map>
 #include <vector>
 #include <cstdlib> // for std::getenv
-#include <filesystem> // Required for std::filesystem::exists
+#include <filesystem> // Required for std::filesystem::exists, copy_file
 #include <websocketpp/config/asio_no_tls.hpp>
 #include <websocketpp/server.hpp>
+#include <nlohmann/json.hpp>
+
+// New includes for the fix
+#include <atomic>
+#include <chrono>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
 
 using json = nlohmann::json;
 
@@ -24,89 +32,177 @@ using websocketpp::lib::bind;
 using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
 
+// Helper to get current time in milliseconds
+long long getCurrentTimeMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
 struct WorkFLow {
     std::shared_ptr<EdgeRender> _render = nullptr;
     std::function<void(const std::string &msg)> _sendText = nullptr;
-    // --- FIX: Add a variable to hold the audio path while we wait for the client ---
     std::string pending_audio_path = "";
+    std::atomic<bool> paused{false};
+    std::atomic<bool> initialized{false};
+    std::atomic<long long> last_active_ts{0}; // epoch ms
+
+    // thread-safe queue of audio paths for EdgeRender
+    std::mutex tts_queue_mutex;
+    std::queue<std::string> tts_queue;
+    std::condition_variable tts_cv;
 
     WorkFLow() {
         _render = nullptr;
+        paused.store(false);
+        initialized.store(false);
+        last_active_ts = getCurrentTimeMs();
     }
-    
+
+    ~WorkFLow() {
+        stop(); // ensure cleanup
+    }
+
+    // update last active time
+    void touch() {
+        last_active_ts = getCurrentTimeMs();
+    }
+
+    // Start / init renderer
     int init(std::function<void(std::vector<uint8_t> &data)> imgHdl,
              std::function<void(const std::string &msg)> msgHdl,
              const std::string &role = "SiYao") {
-        
+
+        touch();
+        // Clean up prior render if any
+        if (_render) {
+            try { _render->stopRender(); } catch(...) {}
+            _render.reset();
+        }
+
         _sendText = msgHdl;
         _render = std::make_shared<EdgeRender>();
         _render->setImgHdl(imgHdl);
         _render->setMsgHdl(msgHdl);
-        _render->load(role);
-        _render->startRender();
-        return 0;
+        int ret = _render->load(role);
+        if (ret != 0) {
+            PLOGE << "EdgeRender::load failed role=" << role;
+            return ret;
+        }
+        ret = _render->startRender(); // assume startRender returns 0 on success
+        if (ret == 0) {
+            initialized.store(true);
+            PLOGI << "WorkFLow initialized for role=" << role;
+        }
+        return ret;
     }
 
-    // --- FIX: This function now only sends the URL, it doesn't start the lip-sync ---
-    void chat(const std::string &query) {
-        if (query.empty()) {
-            return;
+    // Pause without freeing renderer (keep resources alive)
+    void pause() {
+        touch();
+        paused.store(true);
+        PLOGI << "WorkFLow paused";
+        if (_render) {
+            try { _render->pauseRendering(); } catch(...) {}
         }
+    }
+
+    // Resume activity
+    void resume() {
+        touch();
+        paused.store(false);
+        PLOGI << "WorkFLow resumed";
+        if (_render) {
+            try { _render->resumeRendering(); } catch(...) {}
+        }
+    }
+
+    bool isPaused() const { return paused.load(); }
+
+    // Stop and free renderer and clear queues
+    void stop() {
+        PLOGI << "Stopping WorkFLow";
+        try {
+            // notify any waiting TTS consumer
+            {
+                std::lock_guard<std::mutex> lk(tts_queue_mutex);
+                while (!tts_queue.empty()) tts_queue.pop();
+            }
+            tts_cv.notify_all();
+
+            if (_render) {
+                try { _render->stopRender(); } catch (const std::exception &e) { PLOGE << "stopRender exc: " << e.what(); }
+                _render.reset();
+            }
+        } catch (...) {
+            PLOGE << "Exception during WorkFLow::stop()";
+        }
+        initialized.store(false);
+        pending_audio_path = "";
+    }
+
+    // Enqueue a TTS file path (full path) for lip-sync
+    void enqueueTTS(const std::string &fullpath) {
+        // This is a placeholder for where you'd integrate with EdgeRender's queue.
+        // Assuming EdgeRender has a method like this.
+        if (_render) {
+            _render->enqueueTTS(fullpath);
+            PLOGI << "Enqueued TTS file for EdgeRender: " << fullpath;
+        } else {
+             PLOGW << "Cannot enqueue TTS, render is null.";
+        }
+    }
+    
+    // New chat method to handle audio_id
+    void chat(const std::string &query) {
+        if (query.empty()) return;
         PLOGI << "Processing query for TTS: " << query;
 
         std::thread([this, query]() {
-            std::string original_audio_path = tts::tts(query, "Aaliyah-PlayAI");
+            this->touch();
 
+            std::string original_audio_path = tts::tts(query, "Aaliyah-PlayAI");
             if (original_audio_path.empty()) {
                 PLOGE << "TTS failed for query: '" << query << "'";
                 return;
             }
-            
-            // Convert the audio for the lip-sync engine
-            std::string converted_audio_path = original_audio_path;
-            size_t pos = converted_audio_path.rfind(".wav");
-            if (pos != std::string::npos) {
-                converted_audio_path.insert(pos, "_16k_mono");
-            }
-            std::string ffmpeg_command = "ffmpeg -y -i " + original_audio_path + 
-                                         " -ar 16000 -ac 1 -c:a pcm_s16le " + converted_audio_path;
-            int ret = std::system(ffmpeg_command.c_str());
 
-            if (ret != 0 || !std::filesystem::exists(converted_audio_path)) {
+            // Build converted path (e.g., original.wav -> original_16k_mono.wav)
+            std::string converted = original_audio_path;
+            size_t pos = converted.rfind(".wav");
+            if (pos != std::string::npos) converted.insert(pos, "_16k_mono");
+
+            std::string ffmpeg_cmd = "ffmpeg -y -i \"" + original_audio_path + "\" -ar 16000 -ac 1 -c:a pcm_s16le \"" + converted + "\"";
+            int ret = std::system(ffmpeg_cmd.c_str());
+            if (ret != 0 || !std::filesystem::exists(converted)) {
                 PLOGE << "FFmpeg conversion failed for: " << original_audio_path;
                 return;
             }
 
-            // Store the path to the converted file, ready for lip-sync
-            this->pending_audio_path = converted_audio_path;
-            
-            // Send the URL of the original audio to the client
+            // Copy file into /app/audio so http server can serve it reliably
+            std::string audio_filename = getBaseName(converted); // e.g. abc_16k_mono.wav
+            std::string dest_path = "/app/audio/" + audio_filename;
+            try {
+                std::filesystem::copy_file(converted, dest_path, std::filesystem::copy_options::overwrite_existing);
+                PLOGI << "Copied TTS file to " << dest_path;
+            } catch (const std::exception &e) {
+                PLOGE << "Failed to copy audio to /app/audio/: " << e.what();
+                dest_path = converted;
+            }
+
+            this->pending_audio_path = dest_path;
+
+            // Send URL + audio_id to client for buffering
             if (_sendText) {
-                std::string converted_filename = getBaseName(converted_audio_path);
-                std::string audio_url = "http://localhost:8080/audio/" + converted_filename;
-                
+                std::string audio_url = "http://localhost:8080/audio/" + audio_filename;
                 json response_json;
+                response_json["event"] = "tts_ready";
                 response_json["wav"] = audio_url;
+                response_json["audio_id"] = audio_filename;
                 std::string response_message = response_json.dump();
-                
-                PLOGI << "Sending CLEANED audio URL to client for buffering: " << response_message;
+                PLOGI << "Sending audio info to client: " << response_message;
                 _sendText(response_message);
             }
         }).detach();
-    }
-
-    // --- FIX: New function to start the lip-sync on command ---
-    void startLipSync() {
-        if (_render && !pending_audio_path.empty()) {
-            PLOGI << "Client is ready. Starting lip-sync for: " << pending_audio_path;
-            std::promise<std::string> promise;
-            promise.set_value(pending_audio_path);
-            // 1. Store the temporary future from promise.get_future() in a named variable.
-            std::future<std::string> fut = promise.get_future();
-            // 2. Pass the named variable (an lvalue) to the push function.
-            _render->_ttsTasks.push(fut);
-            pending_audio_path = ""; // Clear after use
-        }
     }
 };
 
@@ -128,17 +224,40 @@ public:
 
     void add(connection_hdl hdl) {
         std::lock_guard<std::mutex> lock(mutex);
+        if (connections.count(hdl) > 0) {
+            PLOGI << "Replacing existing WorkFLow for this handle (cleaning old)";
+            auto old = connections[hdl];
+            if (old) old->stop();
+            connections.erase(hdl);
+        }
         connections[hdl] = std::make_shared<WorkFLow>();
+        PLOGI << "New connection added. Total connections: " << connections.size();
     }
 
     void remove(connection_hdl hdl) {
         std::lock_guard<std::mutex> lock(mutex);
-        connections.erase(hdl);
+        if (connections.count(hdl) > 0) {
+            auto wf = connections[hdl];
+            if (wf) {
+                wf->stop(); // ensure renderer threads are stopped
+            }
+            connections.erase(hdl);
+            PLOGI << "Removed connection. Remaining: " << connections.size();
+        }
     }
 
     size_t size() const {
         std::lock_guard<std::mutex> lock(mutex);
         return connections.size();
+    }
+    
+    std::vector<connection_hdl> listHandles() const {
+        std::lock_guard<std::mutex> lock(mutex);
+        std::vector<connection_hdl> out;
+        for (auto const& [hdl, val] : connections) {
+            out.push_back(hdl);
+        }
+        return out;
     }
 };
 
@@ -165,39 +284,78 @@ void onMsg(server *s, websocketpp::connection_hdl hdl, const std::string &msg) {
     }
 }
 
-// --- FIX: Replace your entire on_message function with this one ---
 void on_message(server *s, websocketpp::connection_hdl hdl,
                 server::message_ptr msg) {
-    PLOGI << "Received: " << msg->get_payload();
+    PLOGD << "Received: " << msg->get_payload();
     try {
         auto root = json::parse(msg->get_payload());
         std::string event = root.value("event", "none");
         auto flow = connectionManager.get(hdl);
 
-        if (!flow) return;
+        if (!flow) {
+            PLOGW << "No workflow found for connection";
+            return;
+        }
+
+        flow->touch();
 
         if (event == "init") {
             std::string role = root.value("role", "SiYao");
+            PLOGI << "Initializing workflow for role: " << role;
             int ret = flow->init(std::bind(onImg, s, hdl, std::placeholders::_1),
                                  std::bind(onMsg, s, hdl, std::placeholders::_1), role);
-            s->send(hdl, "init " + std::to_string(ret), websocketpp::frame::opcode::text);
+
+            json response;
+            response["event"] = "init_result";
+            response["status"] = ret;
+            response["message"] = (ret == 0) ? "success" : "failed";
+            s->send(hdl, response.dump(), websocketpp::frame::opcode::text);
+            PLOGI << "Sent init response: " << response.dump();
 
         } else if (event == "query") {
+            if (!flow->initialized) {
+                PLOGW << "Workflow not initialized, cannot process query";
+                json error_response;
+                error_response["event"] = "error";
+                error_response["message"] = "Workflow not initialized";
+                s->send(hdl, error_response.dump(), websocketpp::frame::opcode::text);
+                return;
+            }
             std::string query = root.value("value", "");
+            PLOGI << "Processing query: " << query;
             flow->chat(query);
-        
+
         } else if (event == "audio_ready") {
-            // Client has buffered the audio. Start lip-sync and tell client to play.
-            flow->startLipSync();
-            json play_command;
-            play_command["event"] = "play_audio";
-            s->send(hdl, play_command.dump(), websocketpp::frame::opcode::text);
+            std::string audio_id = root.value("audio_id", "");
+            PLOGI << "Client audio_ready for audio_id=" << audio_id;
+            if (!audio_id.empty()) {
+                std::string audio_full_path = "/app/audio/" + audio_id;
+                flow->enqueueTTS(audio_full_path);
+                json play_command;
+                play_command["event"] = "play_audio";
+                s->send(hdl, play_command.dump(), websocketpp::frame::opcode::text);
+            } else {
+                PLOGW << "audio_ready without audio_id";
+            }
+
+        } else if (event == "pause") {
+            flow->pause();
+
+        } else if (event == "resume") {
+            flow->resume();
+
+        } else if (event == "heartbeat") {
+            PLOGD << "Received heartbeat";
+
+        } else {
+            PLOGW << "Unknown event: " << event;
         }
 
     } catch (const std::exception& e) {
         PLOGE << "Error parsing message: " << e.what() << ". Payload: " << msg->get_payload();
     }
-};
+}
+
 
 int main() {
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -224,7 +382,6 @@ int main() {
         }
     }
 
-    // Override API keys with environment variables if they exist.
     const char* groq_key_env = std::getenv("GROQ_API_KEY");
     if (groq_key_env != nullptr && std::string(groq_key_env).length() > 0) {
         config->apiKey = groq_key_env;
@@ -237,29 +394,26 @@ int main() {
         PLOGI << "Loaded LM API Key from environment variable.";
     }
 
-    // Validate the final configuration.
     if (config->apiKey.empty() || config->lmApiKey.empty()) {
         PLOGE << "API Key is missing. Set GROQ_API_KEY/LM_API_KEY environment variables or add them to " << conf;
-        return 0;
+        return 1;
     }
 
     if (config->valid() == false) {
         PLOGE << "config invalid:" << conf;
-        return 0;
+        return 1;
     }
 
     std::string IP = getPublicIP();
     PLOGI << "PublicIP:" << IP;
     httplib::Server svr;
 
-    // Use absolute paths for directory creation and HTTP serving
     std::string cmd = "mkdir -p /app/video /app/audio";
     std::system(cmd.c_str());
     svr.set_mount_point("/video", "/app/video");
     svr.set_mount_point("/audio", "/app/audio");
 
-    std::thread httpth(
-        [&svr] { svr.listen("0.0.0.0", 8080); });
+    std::thread httpth([&svr] { svr.listen("0.0.0.0", 8080); });
     PLOGD << "http server start at 8080";
 
     server ws_server;
@@ -270,39 +424,57 @@ int main() {
 
     ws_server.set_open_handler([&](connection_hdl hdl) {
         connectionManager.add(hdl);
-        PLOGI << "new connection: " << connectionManager.size();
+        PLOGI << "New connection, total: " << connectionManager.size();
         json metadata;
         metadata["timestamp"] = getCurrentTime();
         metadata["role"].push_back("SiYao");
         metadata["role"].push_back("DearSister");
-        
         metadata["listen"] = 1;
-        PLOGI << "Sending initial roles and listen signal: " << metadata.dump();
-        
-        std::string metadata_str =
-            metadata.dump(-1, ' ', false, json::error_handler_t::ignore);
+
+        std::string metadata_str = metadata.dump();
         uint32_t metadata_length = static_cast<uint32_t>(metadata_str.size());
-        PLOGI << "send role:" << metadata_str;
         
         auto message_buffer = std::make_shared<std::vector<uint8_t>>();
-        
         uint32_t net_length = htonl(metadata_length);
         message_buffer->insert(message_buffer->end(),
-                               reinterpret_cast<uint8_t *>(&net_length),
-                               reinterpret_cast<uint8_t *>(&net_length) + 4);
-        
-        message_buffer->insert(message_buffer->end(), metadata_str.begin(),
-                               metadata_str.end());
+                               reinterpret_cast<uint8_t*>(&net_length),
+                               reinterpret_cast<uint8_t*>(&net_length) + 4);
+        message_buffer->insert(message_buffer->end(), metadata_str.begin(), metadata_str.end());
         ws_server.send(hdl, message_buffer->data(), message_buffer->size(),
                        websocketpp::frame::opcode::binary);
+        PLOGI << "Sent initial roles metadata";
     });
 
     ws_server.set_close_handler([&](connection_hdl hdl) {
         connectionManager.remove(hdl);
-        PLOGI << "连接关闭，剩余连接数: " << connectionManager.size();
+        PLOGI << "Connection closed, remaining: " << connectionManager.size();
     });
 
     ws_server.set_message_handler(bind(&on_message, &ws_server, ::_1, ::_2));
+    
+    // Idle session cleanup thread
+    const long long IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+    std::thread session_cleaner([&]() {
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            long long now = getCurrentTimeMs();
+            std::vector<connection_hdl> to_remove;
+            auto handles = connectionManager.listHandles();
+            for (auto const& hdl : handles) {
+                auto wf = connectionManager.get(hdl);
+                if (!wf) continue;
+                if (wf->isPaused() && (now - wf->last_active_ts) > IDLE_TIMEOUT_MS) {
+                    PLOGI << "Session idle for > timeout, scheduling removal.";
+                    to_remove.push_back(hdl);
+                }
+            }
+            for (auto const& hdl : to_remove) {
+                connectionManager.remove(hdl);
+            }
+        }
+    });
+    session_cleaner.detach();
+
 
     ws_server.listen(6001);
     ws_server.start_accept();
