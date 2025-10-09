@@ -62,9 +62,6 @@ void EdgeRender::startRender() {
             bool ret = _frames.try_pop(rgba);
             if (ret) {
                 _imgHdl(*rgba);
-            } else {
-                // This error is normal when the avatar is idle. We can comment it out.
-                // PLOGE << "lack of frame"; 
             }
             auto frameEnd = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(frameEnd - frameStart);
@@ -86,7 +83,7 @@ void EdgeRender::startRender() {
         }
     });
 
-    // --- FIX STARTS HERE: Corrected Render Thread Logic ---
+    // --- FINAL CORRECTED RENDER THREAD WITH STATE MACHINE ---
     _thRender = std::thread([this] {
         int i = 0;
         int all_buf = 0;
@@ -110,6 +107,7 @@ void EdgeRender::startRender() {
             // Main State Machine Logic
             if (speaking && buf_index < all_buf) {
                 // --- STATE 1: Currently Speaking ---
+                // Render the lip-synced animation frame by frame.
                 if (_modelInfo._hasMask) {
                     _digit->mskrstbuf(buf_index++, frame._rawPath.c_str(), frame.rect,
                                       frame._maskPath.c_str(), frame._sgPath.c_str(),
@@ -121,12 +119,13 @@ void EdgeRender::startRender() {
                                       reinterpret_cast<char *>(mat.data),
                                       _modelInfo._height * _modelInfo._width * 3);
                 }
+                // This correctly generates the URL
                 metadata["wav"] = "http://localhost:8080/audio/" + getBaseName(current_wav);
 
             } else {
                 if (speaking) {
                     // --- STATE 2: Just Finished Speaking ---
-                    // We were speaking, but buf_index has reached all_buf.
+                    // This correctly sends the "listen" signal to continue the conversation.
                     PLOGI << "Finished speaking. Sending listen signal.";
                     metadata["listen"] = 1;
                     speaking = false;
@@ -137,7 +136,6 @@ void EdgeRender::startRender() {
 
                 // --- STATE 3: Check for New Speech or Stay Idle ---
                 if (_wavs.try_pop(current_wav)) {
-                    // A new audio file has arrived. Start the speaking process.
                     if (!current_wav.empty()) {
                         Timer t("feat extreact: " + current_wav);
                         all_buf = _digit->newwav(current_wav.c_str(), "");
@@ -149,11 +147,10 @@ void EdgeRender::startRender() {
                             PLOGE << "Lip-sync feature extraction failed. Lips will not move.";
                         }
                     }
-                    // Loop immediately to start rendering the first frame of speech
                     continue; 
                 } else {
                     // --- STATE 4: Idle ---
-                    // No new audio, not speaking. Render the idle animation.
+                    // Renders the idle animation when nothing else is happening.
                      _digit->drawonebuf(frame._rawPath.c_str(),
                                        reinterpret_cast<char *>(mat.data),
                                        _modelInfo._height * _modelInfo._width * 3);
@@ -164,7 +161,6 @@ void EdgeRender::startRender() {
             cv::cvtColor(mat, rgba, cv::COLOR_BGR2RGBA);
 
             std::string metadata_str = metadata.dump();
-            PLOGD << "Generated Metadata: " << metadata_str;
             
             uint32_t metadata_length = static_cast<uint32_t>(metadata_str.size());
             auto message_buffer = std::make_shared<std::vector<uint8_t>>();
@@ -178,7 +174,6 @@ void EdgeRender::startRender() {
             _frames.push(message_buffer);
         }
     });
-    // --- FIX ENDS HERE ---
 }
 
 
