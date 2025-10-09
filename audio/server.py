@@ -2,6 +2,7 @@ import asyncio
 import websockets
 import json
 import numpy as np
+from collections import deque # --- NEW: Import deque for efficient buffering ---
 from silvad import SileroVAD
 from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
@@ -13,10 +14,10 @@ HOST = "0.0.0.0"
 PORT = 6002
 VAD_FRAME_SIZE = 512
 
-# --- NEW: VAD Silence Threshold ---
-# Number of consecutive silent chunks required to trigger transcription.
-# 15 chunks * 32ms/chunk = ~480ms of silence.
+# Number of silent chunks required to trigger transcription (~0.5 seconds)
 SILENCE_THRESHOLD = 15 
+# Number of audio chunks to keep as padding before speech starts (~0.3 seconds)
+PADDING_CHUNKS = 10
 
 # --- Model Initialization ---
 try:
@@ -35,7 +36,9 @@ async def handle_client(websocket):
     audio_buffer = np.array([], dtype=np.int16)
     speech_buffer = np.array([], dtype=np.int16)
     is_speaking = False
-    silence_counter = 0 # --- NEW: Counter for silent chunks ---
+    silence_counter = 0
+    # --- NEW: A rolling buffer to store pre-speech audio padding ---
+    padding_buffer = deque(maxlen=PADDING_CHUNKS)
     
     try:
         async for message in websocket:
@@ -51,26 +54,36 @@ async def handle_client(websocket):
                     vad_chunk = audio_buffer[:VAD_FRAME_SIZE]
                     audio_buffer = audio_buffer[VAD_FRAME_SIZE:]
 
+                    # --- MODIFIED: More robust VAD and buffering logic ---
+                    if not is_speaking:
+                        # While not speaking, continuously update the padding buffer
+                        padding_buffer.append(vad_chunk)
+
                     vad_result = VAD.is_vad(vad_chunk)
 
-                    # --- MODIFIED: More robust VAD logic ---
                     if vad_result and 'start' in vad_result:
                         if not is_speaking:
                             print("Speech start detected.")
                             is_speaking = True
-                        speech_buffer = np.concatenate((speech_buffer, vad_chunk))
-                        silence_counter = 0 # Reset silence counter on speech
+                            # When speech starts, initialize the speech buffer with the padding
+                            speech_buffer = np.concatenate(list(padding_buffer))
+                        else:
+                            # Speech continues, add the current chunk
+                            speech_buffer = np.concatenate((speech_buffer, vad_chunk))
+                        silence_counter = 0
                     
                     elif is_speaking:
+                        # Append the current chunk to the speech buffer
                         speech_buffer = np.concatenate((speech_buffer, vad_chunk))
-                        # If no 'start' is detected, it's either continued speech or silence
+                        
+                        # Check for silence
                         if not vad_result:
                             silence_counter += 1
                         else:
-                            silence_counter = 0 # Speech continues, reset counter
+                            silence_counter = 0
 
                         if silence_counter >= SILENCE_THRESHOLD:
-                            print(f"Sustained silence ({silence_counter} chunks) detected. Transcribing...")
+                            print(f"Sustained silence detected. Transcribing...")
                             
                             speech_float32 = speech_buffer.astype(np.float32) / 32768.0
                             
@@ -88,7 +101,7 @@ async def handle_client(websocket):
                             # Reset state for the next utterance
                             is_speaking = False
                             speech_buffer = np.array([], dtype=np.int16)
-                            audio_buffer = np.array([], dtype=np.int16) # Also clear main buffer
+                            padding_buffer.clear()
                             silence_counter = 0
                             
                             if transcribed_text:
@@ -127,4 +140,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nServer is shutting down.")
-        
