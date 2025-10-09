@@ -4,8 +4,10 @@ import json
 import numpy as np
 from silvad import SileroVAD
 from funasr import AutoModel
+# --- FIX 1: Import the post-processing function ---
+from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
-# - -- Configuration ---
+# --- Configuration ---
 ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
 HOST = "0.0.0.0"
 PORT = 6002
@@ -60,22 +62,21 @@ async def handle_client(websocket):
                         speech_float32 = speech_buffer.astype(np.float32) / 32768.0
                         
                         loop = asyncio.get_running_loop()
-
-                        # --- FIX: Wrap the ASR call in a lambda to add the language="en" parameter ---
                         results = await loop.run_in_executor(
                             None,
                             lambda: ASR.generate(input=speech_float32, language="en")
                         )
-                        # --- END FIX ---
                         
                         transcribed_text = ""
                         if results and len(results) > 0 and "text" in results[0]:
-                            transcribed_text = results[0]["text"]
+                            # --- FIX 2: Get the raw text and clean it using the post-process function ---
+                            raw_text_with_tags = results[0]["text"]
+                            transcribed_text = rich_transcription_postprocess(raw_text_with_tags)
                         
                         speech_buffer = np.array([], dtype=np.int16)
                         
                         if transcribed_text:
-                            print(f"Transcription result: '{transcribed_text}'")
+                            print(f"Clean Transcription: '{transcribed_text}'")
                             response = json.dumps({
                                 'event': 'query',
                                 'value': transcribed_text
