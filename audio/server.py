@@ -16,8 +16,8 @@ VAD_FRAME_SIZE = 512
 
 # --- NEW: Advanced Tuning Parameters ---
 # 1. How long to wait for silence after speech before transcribing (in chunks).
-#    A higher value is more patient for slower speakers. (25 chunks * 32ms/chunk = 800ms)
-SILENCE_THRESHOLD_CHUNKS = 25
+#    A higher value is more patient for slower speakers. (40 chunks * 32ms/chunk = 1280ms)
+SILENCE_THRESHOLD_CHUNKS = 40
 
 # 2. How much audio to keep before speech starts to provide context (in chunks).
 #    (16 chunks * 32ms/chunk = 512ms)
