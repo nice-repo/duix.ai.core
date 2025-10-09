@@ -6,10 +6,7 @@ from silvad import SileroVAD
 from funasr import AutoModel
 
 # --- Configuration ---
-# --- FIX: Use the correct Hugging Face model ID for SenseVoiceSmall ---
 ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
-
-# The server will listen on this host and port.
 HOST = "0.0.0.0"
 PORT = 6002
 VAD_FRAME_SIZE = 512
@@ -18,7 +15,6 @@ VAD_FRAME_SIZE = 512
 try:
     print("--- Initializing VAD and ASR models ---")
     VAD = SileroVAD()
-    # This now correctly uses the Hugging Face model on the CPU
     ASR = AutoModel(model=ASR_MODEL, hub="hf", device="cpu")
     print("--- Models initialized successfully ---")
 except Exception as e:
@@ -26,7 +22,6 @@ except Exception as e:
     exit(1)
 
 
-# Corrected function signature
 async def handle_client(websocket):
     """
     This function is called for each new client that connects to the WebSocket server.
@@ -59,14 +54,23 @@ async def handle_client(websocket):
                     if vad_result and 'start' in vad_result and not is_speaking:
                         print("Speech start detected.")
                         is_speaking = True
-                        # Include the chunk that triggered the start
                         speech_buffer = np.concatenate((speech_buffer, vad_chunk))
                     
                     if vad_result and 'end' in vad_result and is_speaking:
                         print("Speech end detected. Transcribing...")
                         is_speaking = False
                         
-                        results = ASR.generate(input=speech_buffer)
+                        # --- FIX STARTS HERE ---
+                        # ASR.generate() is a blocking, CPU-intensive function.
+                        # We must run it in a separate thread to avoid freezing the server.
+                        loop = asyncio.get_running_loop()
+                        results = await loop.run_in_executor(
+                            None,              # Use the default thread pool executor
+                            ASR.generate,      # The function to run
+                            speech_buffer      # The argument to pass to the function
+                        )
+                        # --- FIX ENDS HERE ---
+                        
                         transcribed_text = ""
                         if results and len(results) > 0 and "text" in results[0]:
                             transcribed_text = results[0]["text"]
