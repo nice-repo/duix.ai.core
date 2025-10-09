@@ -5,7 +5,7 @@ import numpy as np
 from silvad import SileroVAD
 from funasr import AutoModel
 
-# --- Configuration ---
+# - -- Configuration ---
 ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
 HOST = "0.0.0.0"
 PORT = 6002
