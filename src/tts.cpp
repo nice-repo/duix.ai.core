@@ -168,10 +168,13 @@ std::string tts(const std::string &text, const std::string &voice) {
   Timer t("tts " + text);
   std::string wavPath = createSafeFilename(text);
 	
-  
+// --- Temporarily disable caching to prevent using corrupt files. ---
+// This forces a new download for every request.
+/*  
   if (std::filesystem::exists(wavPath)) {
     return wavPath;
   }
+  */
 
   auto *config = config::get();
 
