@@ -8,7 +8,9 @@ from funasr import AutoModel
 from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
 # --- Configuration ---
-ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
+##ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
+
+ASR_MODEL = "/app/audio/SenseVoiceSmall"
 HOST = "0.0.0.0"
 PORT = 6002
 VAD_FRAME_SIZE = 512
