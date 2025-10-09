@@ -53,27 +53,20 @@ struct WorkFLow {
     }
 
     ~WorkFLow() {
-        stop(); // ensure cleanup
+        stop();
     }
 
-    // update last active time
     void touch() {
         last_active_ts = getCurrentTimeMs();
     }
 
-    // Start / init renderer
     int init(std::function<void(std::vector<uint8_t> &data)> imgHdl,
              std::function<void(const std::string &msg)> msgHdl,
              const std::string &role = "SiYao") {
-
         touch();
-        // Clean up prior render if any
         if (_render) {
-            // NOTE: The original EdgeRender interface might not have a stop function.
-            // Resetting the smart pointer is the best we can do to signal cleanup.
             _render.reset();
         }
-
         _sendText = msgHdl;
         _render = std::make_shared<EdgeRender>();
         _render->setImgHdl(imgHdl);
@@ -83,68 +76,65 @@ struct WorkFLow {
             PLOGE << "EdgeRender::load failed role=" << role;
             return ret;
         }
-        _render->startRender(); // FIX: Does not return a value.
+        _render->startRender();
         initialized.store(true);
         PLOGI << "WorkFLow initialized for role=" << role;
-        return 0; // Assume success if we reach here
+        return 0;
     }
 
-    // Pause without freeing renderer (keep resources alive)
     void pause() {
         touch();
         paused.store(true);
         PLOGI << "WorkFLow paused";
-        // NOTE: Removed call to non-existent _render->pauseRendering()
     }
 
-    // Resume activity
     void resume() {
         touch();
         paused.store(false);
         PLOGI << "WorkFLow resumed";
-        // NOTE: Removed call to non-existent _render->resumeRendering()
     }
 
     bool isPaused() const { return paused.load(); }
 
-    // Stop and free renderer and clear queues
     void stop() {
         PLOGI << "Stopping WorkFLow";
         if (_render) {
-            // NOTE: Removed call to non-existent _render->stopRender()
             _render.reset();
         }
         initialized.store(false);
     }
 
-    // Enqueue a TTS file path for lip-sync using the original promise/future method
+    // Enqueue a TTS file path for lip-sync
     void enqueueTTS(const std::string &fullpath) {
-        if (_render && _render->_ttsTasks.is_lock_free()) {
+        // FIX: Removed the non-existent 'is_lock_free()' check.
+        if (_render) {
             std::promise<std::string> promise;
             promise.set_value(fullpath);
             std::future<std::string> fut = promise.get_future();
-            _render->_ttsTasks.push(std::move(fut)); // Use std::move for future
+            
+            // FIX: Reverted the push call to pass the lvalue directly.
+            // This avoids the rvalue binding error and relies on the compiler's
+            // move semantics for passing futures into functions.
+            _render->_ttsTasks.push(fut); 
+            
             PLOGI << "Enqueued TTS file for EdgeRender: " << fullpath;
         } else {
-             PLOGI << "Cannot enqueue TTS, render is null or queue is busy."; // FIX: PLOGW -> PLOGI
+             PLOGI << "Cannot enqueue TTS, render is null.";
         }
     }
 
-    // New chat method to handle audio_id
     void chat(const std::string &query) {
         if (query.empty()) return;
         PLOGI << "Processing query for TTS: " << query;
 
         std::thread([this, query]() {
             this->touch();
-
             std::string original_audio_path = tts::tts(query, "Aaliyah-PlayAI");
             if (original_audio_path.empty()) {
                 PLOGE << "TTS failed for query: '" << query << "'";
                 return;
             }
 
-            // Build converted path (e.g., original.wav -> original_16k_mono.wav)
             std::string converted = original_audio_path;
             size_t pos = converted.rfind(".wav");
             if (pos != std::string::npos) converted.insert(pos, "_16k_mono");
@@ -156,18 +146,16 @@ struct WorkFLow {
                 return;
             }
 
-            // Copy file into /app/audio so http server can serve it reliably
-            std::string audio_filename = getBaseName(converted); // e.g. abc_16k_mono.wav
+            std::string audio_filename = getBaseName(converted);
             std::string dest_path = "/app/audio/" + audio_filename;
             try {
                 std::filesystem::copy_file(converted, dest_path, std::filesystem::copy_options::overwrite_existing);
                 PLOGI << "Copied TTS file to " << dest_path;
             } catch (const std::exception &e) {
                 PLOGE << "Failed to copy audio to /app/audio/: " << e.what();
-                return; // Don't proceed if copy fails
+                return;
             }
 
-            // Send URL + audio_id to client for buffering
             if (_sendText) {
                 std::string audio_url = "http://localhost:8080/audio/" + audio_filename;
                 json response_json;
@@ -215,7 +203,7 @@ public:
         if (connections.count(hdl) > 0) {
             auto wf = connections[hdl];
             if (wf) {
-                wf->stop(); // ensure renderer threads are stopped
+                wf->stop();
             }
             connections.erase(hdl);
             PLOGI << "Removed connection. Remaining: " << connections.size();
@@ -269,7 +257,7 @@ void on_message(server *s, websocketpp::connection_hdl hdl,
         auto flow = connectionManager.get(hdl);
 
         if (!flow) {
-            PLOGI << "No workflow found for connection"; // FIX: PLOGW -> PLOGI
+            PLOGI << "No workflow found for connection";
             return;
         }
 
@@ -290,7 +278,7 @@ void on_message(server *s, websocketpp::connection_hdl hdl,
 
         } else if (event == "query") {
             if (!flow->initialized) {
-                PLOGI << "Workflow not initialized, cannot process query"; // FIX: PLOGW -> PLOGI
+                PLOGI << "Workflow not initialized, cannot process query";
                 json error_response;
                 error_response["event"] = "error";
                 error_response["message"] = "Workflow not initialized";
@@ -311,7 +299,7 @@ void on_message(server *s, websocketpp::connection_hdl hdl,
                 play_command["event"] = "play_audio";
                 s->send(hdl, play_command.dump(), websocketpp::frame::opcode::text);
             } else {
-                PLOGI << "audio_ready without audio_id"; // FIX: PLOGW -> PLOGI
+                PLOGI << "audio_ready without audio_id";
             }
 
         } else if (event == "pause") {
@@ -324,7 +312,7 @@ void on_message(server *s, websocketpp::connection_hdl hdl,
             PLOGD << "Received heartbeat";
 
         } else {
-            PLOGI << "Unknown event: " << event; // FIX: PLOGW -> PLOGI
+            PLOGI << "Unknown event: " << event;
         }
 
     } catch (const std::exception& e) {
@@ -333,8 +321,6 @@ void on_message(server *s, websocketpp::connection_hdl hdl,
 }
 
 int main(int argc, char* argv[]) {
-    // Note: You may need to initialize your logger here, e.g., clog::init();
-    
     curl_global_init(CURL_GLOBAL_DEFAULT);
     auto *config = config::get();
     std::string conf = getarg("conf/conf.json", "-c", "--conf");
@@ -429,8 +415,7 @@ int main(int argc, char* argv[]) {
 
     ws_server.set_message_handler(bind(&on_message, &ws_server, ::_1, ::_2));
     
-    // Idle session cleanup thread
-    const long long IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+    const long long IDLE_TIMEOUT_MS = 5 * 60 * 1000;
     std::thread session_cleaner([&]() {
         while (true) {
             std::this_thread::sleep_for(std::chrono::seconds(30));
@@ -451,7 +436,6 @@ int main(int argc, char* argv[]) {
         }
     });
     session_cleaner.detach();
-
 
     ws_server.listen(6001);
     ws_server.start_accept();
