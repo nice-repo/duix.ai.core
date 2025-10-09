@@ -82,14 +82,14 @@ struct WorkFLow {
             
             // Send the URL of the original audio to the client
             if (_sendText) {
-                std::string original_filename = getBaseName(original_audio_path);
-                std::string audio_url = "http://localhost:8080/audio/" + original_filename;
+                std::string converted_filename = getBaseName(converted_audio_path);
+                std::string audio_url = "http://localhost:8080/audio/" + converted_filename;
                 
                 json response_json;
                 response_json["wav"] = audio_url;
                 std::string response_message = response_json.dump();
                 
-                PLOGI << "Sending audio URL to client for buffering: " << response_message;
+                PLOGI << "Sending CLEANED audio URL to client for buffering: " << response_message;
                 _sendText(response_message);
             }
         }).detach();
