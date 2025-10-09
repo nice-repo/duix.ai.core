@@ -101,7 +101,10 @@ struct WorkFLow {
             PLOGI << "Client is ready. Starting lip-sync for: " << pending_audio_path;
             std::promise<std::string> promise;
             promise.set_value(pending_audio_path);
-            _render->_ttsTasks.push(promise.get_future());
+            // 1. Store the temporary future from promise.get_future() in a named variable.
+            std::future<std::string> fut = promise.get_future();
+            // 2. Pass the named variable (an lvalue) to the push function.
+            _render->_ttsTasks.push(fut);
             pending_audio_path = ""; // Clear after use
         }
     }
