@@ -6,15 +6,17 @@ from silvad import SileroVAD
 from funasr import AutoModel
 
 # --- Configuration ---
+# Using the lightweight SenseVoiceSmall model from Hugging Face for good performance on CPU.
 ASR_MODEL = "FunAudioLLM/SenseVoiceSmall"
 HOST = "0.0.0.0"
 PORT = 6002
-VAD_FRAME_SIZE = 512
+VAD_FRAME_SIZE = 512   # Process audio in chunks of 512 samples for VAD
 
-# Create instances of the VAD and ASR models
+# --- Model Initialization ---
 try:
     print("--- Initializing VAD and ASR models ---")
     VAD = SileroVAD()
+    # Initialize the model to run on CPU and download from the Hugging Face hub
     ASR = AutoModel(model=ASR_MODEL, hub="hf", device="cpu")
     print("--- Models initialized successfully ---")
 except Exception as e:
@@ -25,6 +27,7 @@ except Exception as e:
 async def handle_client(websocket):
     """
     This function is called for each new client that connects to the WebSocket server.
+    It handles audio buffering, voice activity detection, and transcription.
     """
     print(f"Client connected from {websocket.remote_address}")
 
@@ -39,42 +42,53 @@ async def handle_client(websocket):
                 if 'audioData' not in data or 'metadata' not in data:
                     continue
 
+                # Audio data comes from the browser as a list of numbers
                 audio_chunk = np.array(data['audioData'], dtype=np.int16)
                 audio_buffer = np.concatenate((audio_buffer, audio_chunk))
 
+                # Process the audio in fixed-size chunks for VAD
                 while len(audio_buffer) >= VAD_FRAME_SIZE:
                     vad_chunk = audio_buffer[:VAD_FRAME_SIZE]
                     audio_buffer = audio_buffer[VAD_FRAME_SIZE:]
 
+                    # Use the VAD to detect if speech is present in the chunk
                     vad_result = VAD.is_vad(vad_chunk)
 
                     if is_speaking:
+                        # If we are in a speech segment, keep adding audio to the speech_buffer
                         speech_buffer = np.concatenate((speech_buffer, vad_chunk))
 
                     if vad_result and 'start' in vad_result and not is_speaking:
                         print("Speech start detected.")
                         is_speaking = True
+                        # When speech starts, add the triggering chunk to the speech_buffer
                         speech_buffer = np.concatenate((speech_buffer, vad_chunk))
                     
                     if vad_result and 'end' in vad_result and is_speaking:
-                        print("Speech end detected. Transcribing...")
+                        print("Speech end detected. Preparing for transcription...")
                         is_speaking = False
                         
-                        # --- FIX STARTS HERE ---
-                        # ASR.generate() is a blocking, CPU-intensive function.
-                        # We must run it in a separate thread to avoid freezing the server.
+                        # --- FIX: NON-BLOCKING TRANSCRIPTION ---
+                        
+                        # 1. The model expects audio data as 32-bit floats, not 16-bit integers.
+                        #    Convert the buffer and normalize it to the range [-1.0, 1.0].
+                        speech_float32 = speech_buffer.astype(np.float32) / 32768.0
+                        
+                        # 2. ASR.generate() is a blocking, CPU-intensive function.
+                        #    We run it in a separate thread using run_in_executor to avoid freezing the server.
                         loop = asyncio.get_running_loop()
                         results = await loop.run_in_executor(
                             None,              # Use the default thread pool executor
-                            ASR.generate,      # The function to run
-                            speech_buffer      # The argument to pass to the function
+                            ASR.generate,      # The function to run in the thread
+                            speech_float32     # The argument for the function
                         )
-                        # --- FIX ENDS HERE ---
+                        # --- END FIX ---
                         
                         transcribed_text = ""
                         if results and len(results) > 0 and "text" in results[0]:
                             transcribed_text = results[0]["text"]
                         
+                        # Clear the buffer for the next utterance
                         speech_buffer = np.array([], dtype=np.int16)
                         
                         if transcribed_text:
@@ -113,4 +127,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Server is shutting down.")
+        print("\nServer is shutting down.")
