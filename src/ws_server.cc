@@ -148,12 +148,19 @@ struct WorkFLow {
 
             std::string audio_filename = getBaseName(converted);
             std::string dest_path = "/app/audio/" + audio_filename;
-            try {
-                std::filesystem::copy_file(converted, dest_path, std::filesystem::copy_options::overwrite_existing);
-                PLOGI << "Copied TTS file to " << dest_path;
-            } catch (const std::exception &e) {
-                PLOGE << "Failed to copy audio to /app/audio/: " << e.what();
-                return;
+
+            // --- FIX: Only copy the file if it's not already in the destination directory ---
+            if (converted != dest_path) {
+                try {
+                    // This option ensures if a file from a previous session exists, it's replaced.
+                    std::filesystem::copy_file(converted, dest_path, std::filesystem::copy_options::overwrite_existing);
+                    PLOGI << "Copied TTS audio to " << dest_path;
+                } catch (const std::filesystem::filesystem_error& e) {
+                    PLOGE << "Failed to copy audio to /app/audio/: " << e.what();
+                    return; // Stop if we can't get the file to the right place.
+                }
+            } else {
+                 PLOGD << "Audio file is already in the destination directory. Skipping copy.";
             }
 
             if (_sendText) {
